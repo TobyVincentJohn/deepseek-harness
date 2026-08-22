@@ -423,6 +423,103 @@ describe('fold onto the downstream decision', () => {
   })
 })
 
+describe('hard convergence budgets', () => {
+  it('denies an identical root call before its body exceeds the configured budget', async () => {
+    const ctx = await harness({ maxExactRepeats: 2 })
+    let dispatched = 0
+    ctx.on('tools/execute', async (exec, next) => {
+      if (exec.name === 'probe') dispatched += 1
+      return await next()
+    })
+    ctx.llm.registerAdapter(['mock'], new MockAdapter([
+      toolCallResponse('c1', 'probe', { q: 'same' }),
+      toolCallResponse('c2', 'probe', { q: 'same' }),
+      toolCallResponse('c3', 'probe', { q: 'same' }),
+      textResponse('done'),
+    ]))
+    const agent = ctx.agentLoop.create(SessionId('repeat-budget'), { provider: 'mock', model: 'mock' })
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await waitForIdle(ctx, agent)
+
+    expect(dispatched).toBe(2)
+    const results = [...agent.session.events].filter((event): event is SessionEvent<'tool/result'> => event.type === 'tool/result')
+    expect(results[2]!.data.message.content[0]).toMatchObject({ isError: true })
+    expect(JSON.stringify(results[2]!.data.message.content)).toContain('blocked an identical probe call')
+  })
+
+  it('keeps the exact-call budget when the same tool is also counted by name', async () => {
+    const ctx = await harness({ countByTool: ['probe'], maxExactRepeats: 2, maxConsecutiveByTool: 10 })
+    let dispatched = 0
+    ctx.on('tools/execute', async (exec, next) => {
+      if (exec.name === 'probe') dispatched += 1
+      return await next()
+    })
+    ctx.llm.registerAdapter(['mock'], new MockAdapter([
+      toolCallResponse('c1', 'probe', { q: 'same' }),
+      toolCallResponse('c2', 'probe', { q: 'same' }),
+      toolCallResponse('c3', 'probe', { q: 'same' }),
+      textResponse('done'),
+    ]))
+    const agent = ctx.agentLoop.create(SessionId('dual-budget'), { provider: 'mock', model: 'mock' })
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await waitForIdle(ctx, agent)
+
+    expect(dispatched).toBe(2)
+    const results = [...agent.session.events].filter((event): event is SessionEvent<'tool/result'> => event.type === 'tool/result')
+    expect(JSON.stringify(results[2]!.data.message.content)).toContain('blocked an identical probe call')
+  })
+
+  it('denies a name-counted root chain even when every argument differs', async () => {
+    const ctx = await harness({ countByTool: ['probe'], maxConsecutiveByTool: 2 })
+    let dispatched = 0
+    ctx.on('tools/execute', async (exec, next) => {
+      if (exec.name === 'probe') dispatched += 1
+      return await next()
+    })
+    ctx.llm.registerAdapter(['mock'], new MockAdapter([
+      toolCallResponse('c1', 'probe', { q: 1 }),
+      toolCallResponse('c2', 'probe', { q: 2 }),
+      toolCallResponse('c3', 'probe', { q: 3 }),
+      textResponse('done'),
+    ]))
+    const agent = ctx.agentLoop.create(SessionId('name-budget'), { provider: 'mock', model: 'mock' })
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await waitForIdle(ctx, agent)
+
+    expect(dispatched).toBe(2)
+    const results = [...agent.session.events].filter((event): event is SessionEvent<'tool/result'> => event.type === 'tool/result')
+    expect(JSON.stringify(results[2]!.data.message.content)).toContain('it already ran 2 times consecutively')
+  })
+
+  it('denies later root tools after the consecutive failure budget', async () => {
+    const ctx = await harness({ maxConsecutiveFailures: 2 })
+    ctx.tools.register(defineContentToolFixture({
+      name: 'fail',
+      description: 'fail',
+      parameters: { changed: { type: 'boolean' } },
+      async execute() { throw new Error('fixture failure') },
+    }))
+    let probeDispatched = false
+    ctx.on('tools/execute', async (exec, next) => {
+      if (exec.name === 'probe') probeDispatched = true
+      return await next()
+    })
+    ctx.llm.registerAdapter(['mock'], new MockAdapter([
+      toolCallResponse('c1', 'fail', {}),
+      toolCallResponse('c2', 'fail', { changed: true }),
+      toolCallResponse('c3', 'probe', {}),
+      textResponse('done'),
+    ]))
+    const agent = ctx.agentLoop.create(SessionId('failure-budget'), { provider: 'mock', model: 'mock' })
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await waitForIdle(ctx, agent)
+
+    expect(probeDispatched).toBe(false)
+    const results = [...agent.session.events].filter((event): event is SessionEvent<'tool/result'> => event.type === 'tool/result')
+    expect(JSON.stringify(results[2]!.data.message.content)).toContain('after 2 consecutive failed calls')
+  })
+})
+
 describe('config validation fails loud', () => {
   async function spine(): Promise<Context> {
     const ctx = new Context()
@@ -456,5 +553,12 @@ describe('config validation fails loud', () => {
     await expect(ctx.plugin(RepeatToolGuard, { argumentsPreviewChars: 0 })).rejects.toThrow(/argumentsPreviewChars/)
     const ctx2 = await spine()
     await expect(ctx2.plugin(RepeatToolGuard, { argumentsPreviewChars: 12.5 })).rejects.toThrow(/argumentsPreviewChars/)
+  })
+
+  it('rejects negative or fractional hard budgets', async () => {
+    const ctx = await spine()
+    await expect(ctx.plugin(RepeatToolGuard, { maxExactRepeats: -1 })).rejects.toThrow(/maxExactRepeats/)
+    const ctx2 = await spine()
+    await expect(ctx2.plugin(RepeatToolGuard, { maxConsecutiveByTool: 1.5 })).rejects.toThrow(/maxConsecutiveByTool/)
   })
 })

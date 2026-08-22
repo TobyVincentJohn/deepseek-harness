@@ -13,6 +13,7 @@ import TokenMeter from '@deepseek-ai/dsh-token-meter'
 import ToolResultPruner, {
   codePointLength,
   DEFAULTS,
+  INPUT_PRUNE_MARKER,
   PRUNE_MARKER,
   resolveConfig,
 } from '@deepseek-ai/dsh-compaction-tool-result-pruner'
@@ -42,6 +43,7 @@ function appendToolStep(
   call: string,
   content: ContentBlock[],
   extra: Record<string, unknown> = {},
+  argumentsJson = '{}',
 ): number {
   const callId = CallId(call)
   session.append('turn/start', {
@@ -53,14 +55,14 @@ function appendToolStep(
     step: 1,
     message: createMessage({
       role: 'assistant',
-      content: [{ type: 'tool-call', id: callId, name: 'bash', arguments: '{}' }],
+      content: [{ type: 'tool-call', id: callId, name: 'bash', arguments: argumentsJson }],
       source: {
         kind: 'model',
         ...{ provider: MODEL, model: MODEL },
       },
     }),
   }, { surfaceOp: 'append' })
-  session.append('tool/call', { turn, step: 1, callId, name: 'bash', arguments: '{}' })
+  session.append('tool/call', { turn, step: 1, callId, name: 'bash', arguments: argumentsJson })
   const result = session.append('tool/result', {
     turn,
     step: 1,
@@ -77,9 +79,21 @@ describe('tool-result pruning configuration', () => {
     const raw = { thresholdChars: 100, headChars: 20, tailChars: 10 }
     const resolved = resolveConfig(raw)
     raw.headChars = 1
-    expect(resolved).toEqual({ thresholdChars: 100, headChars: 20, tailChars: 10 })
+    expect(resolved).toEqual({
+      thresholdChars: 100,
+      headChars: 20,
+      tailChars: 10,
+      inputThresholdChars: 8192,
+      inputPreviewChars: 512,
+    })
     expect(Object.isFrozen(resolved)).toBe(true)
-    expect(DEFAULTS).toEqual({ thresholdChars: 8192, headChars: 4096, tailChars: 1024 })
+    expect(DEFAULTS).toEqual({
+      thresholdChars: 8192,
+      headChars: 4096,
+      tailChars: 1024,
+      inputThresholdChars: 8192,
+      inputPreviewChars: 512,
+    })
     expect(Object.isFrozen(DEFAULTS)).toBe(true)
   })
 
@@ -89,6 +103,7 @@ describe('tool-result pruning configuration', () => {
       [{ headChars: -1 }, /headChars .* non-negative integer/],
       [{ tailChars: 1.5 }, /tailChars .* non-negative integer/],
       [{ thresholdChars: 50, headChars: 20, tailChars: 20 }, /headChars \+ marker \+ tailChars/],
+      [{ inputThresholdChars: 700, inputPreviewChars: 512 }, /inputPreviewChars \+ 256/],
       [{ threshold: 10 }, /unknown key "threshold"/],
     ] as Array<[unknown, RegExp]>
     for (const [config, pattern] of bad) {
@@ -240,7 +255,45 @@ describe('ToolResultPruner session transaction', () => {
     expect(first.charsRemoved).toBe(
       first.pruned.reduce((sum, entry) => sum + entry.charsBefore - entry.charsAfter, 0),
     )
-    expect(second).toEqual({ pruned: [], charsRemoved: 0 })
+    expect(second).toEqual({ pruned: [], prunedInputs: [], charsRemoved: 0 })
+  })
+
+  it('replaces oversized tool-call arguments with digest-bearing JSON while retaining the original event', () => {
+    const session = Session.create(SessionId('large-input'))
+    const argumentsJson = JSON.stringify({ command: `python <<'PY'\n${'print(1)\n'.repeat(400)}PY` })
+    appendToolStep(session, 1, 'large', [{ type: 'text', text: 'ok' }], {}, argumentsJson)
+    session.append('turn/start', { turn: 2 })
+
+    const result = service({
+      ...SMALL,
+      inputThresholdChars: 1000,
+      inputPreviewChars: 100,
+    }).pruneSession(session)
+    expect(result.pruned).toEqual([])
+    expect(result.prunedInputs).toHaveLength(1)
+    expect(result.prunedInputs[0]).toMatchObject({
+      callIds: [CallId('large')],
+      charsBefore: Array.from(argumentsJson).length,
+    })
+    expect(result.charsRemoved).toBeGreaterThan(0)
+
+    const original = session.events[result.prunedInputs[0]!.originalSeq]
+    expect(original?.type === 'assistant/message'
+      ? original.data.message.content[0]
+      : undefined).toMatchObject({ type: 'tool-call', arguments: argumentsJson })
+    const derived = JSON.stringify(session.deriveMessages())
+    expect(derived).toContain('_dsh_pruned_tool_input')
+    expect(derived).toContain('tool input middle pruned')
+    expect(derived).not.toContain('print(1)\\nprint(1)\\nprint(1)')
+    expect(Session.create(session.id, [...session.events]).deriveMessages()).toEqual(session.deriveMessages())
+  })
+
+  it('supports an odd one-character input preview without a tail', () => {
+    const pruner = service({ inputThresholdChars: 1000, inputPreviewChars: 1 })
+    const replacement = pruner.pruneArguments(`A${'x'.repeat(1200)}Z`)
+    expect(replacement).not.toBeNull()
+    const parsed = JSON.parse(replacement!) as { _dsh_pruned_tool_input: { preview: string } }
+    expect(parsed._dsh_pruned_tool_input.preview).toBe(`A${INPUT_PRUNE_MARKER}`)
   })
 
   it('replays to the identical pruned model messages', () => {

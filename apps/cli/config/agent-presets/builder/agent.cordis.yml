@@ -1,0 +1,62 @@
+# Focused synthetic-task builder. It omits web search, skills, goals, planning,
+# delegation, workflows, and Code Mode so the model receives only the tools
+# needed to inspect the supplied corpus and produce the task package.
+
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: >-
+      You are a synthetic task builder powered by {{model}}. Your working directory is {{cwd}}. Inspect supplied evidence before editing, batch deterministic shell work, use corpus_query for WARC data, and run validate_builder_package once after the required package files are complete.
+
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
+
+# The Web/headless deployment defaults to `both`; this preset deliberately
+# exposes only its native tools and omits the inherited run_code transport.
+- id: tool-presentation
+  name: '@deepseek-ai/dsh-agent-tool-presentation'
+  config:
+    mode: native
+
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
+  disabled: !!js process.platform === 'win32'
+
+- id: tool-pwsh
+  name: '@deepseek-ai/dsh-tool-pwsh'
+  disabled: !!js process.platform !== 'win32'
+
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: false
+
+- id: tool-jobs
+  name: '@deepseek-ai/dsh-tool-jobs'
+
+- id: tool-builder
+  name: '@deepseek-ai/dsh-tool-builder'
+
+- id: compaction
+  name: cordis:group
+  group: true
+  isolate:
+    compaction: true
+    toolResultPruner: true
+  config:
+    - id: compaction-basic
+      name: '@deepseek-ai/dsh-compaction-basic'
+
+    - id: tool-result-pruner
+      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+      config:
+        thresholdChars: 8192
+        headChars: 4096
+        tailChars: 1024
+        inputThresholdChars: 8192
+        inputPreviewChars: 512

@@ -536,6 +536,10 @@ export interface ToolResultPruneConfig {
   headChars?: number
   /** Maximum trailing Unicode code points retained. Defaults to `1024`. */
   tailChars?: number
+  /** Prune a tool-call argument string above this many Unicode code points. Defaults to `8192`. */
+  inputThresholdChars?: number
+  /** Maximum argument-preview code points retained inside the replacement JSON. Defaults to `512`. */
+  inputPreviewChars?: number
 }
 ```
 
@@ -1627,10 +1631,16 @@ export interface Config {
    * always compares the FULL canonical string).
    */
   argumentsPreviewChars?: number
+  /** Maximum completed identical root calls before later repeats are denied; `0` disables enforcement. */
+  maxExactRepeats?: number
+  /** Maximum consecutive root calls for a `countByTool` match; `0` disables enforcement. */
+  maxConsecutiveByTool?: number
+  /** Maximum consecutive failed root calls before later root calls are denied; `0` disables enforcement. */
+  maxConsecutiveFailures?: number
 }
 ```
 
-来源：[`packages/guard/repeat-tool-reminder/src/index.ts:28`](../packages/guard/repeat-tool-reminder/src/index.ts)
+来源：[`packages/guard/repeat-tool-reminder/src/index.ts:29`](../packages/guard/repeat-tool-reminder/src/index.ts)
 
 <a id="deepseek-aidsh-sandbox-local"></a>
 
@@ -2551,6 +2561,30 @@ export interface Config {
 ```
 
 来源：[`packages/shell/tool-bash-persistent/src/index.ts:432`](../packages/shell/tool-bash-persistent/src/index.ts)
+
+<a id="deepseek-aidsh-tool-builder"></a>
+
+## `@deepseek-ai/dsh-tool-builder`
+
+需要：`tools` · `fs` · `systemPrompt`
+
+```ts config-catalog
+/** Configuration bounds applied before either tool performs I/O. */
+export interface Config {
+  /** Largest compressed WARC accepted by one query. */
+  maxArchiveBytes?: number
+  /** Largest text file read by package validation. */
+  maxFileBytes?: number
+  /** Most decoded characters scanned from one WARC response body. */
+  maxRecordChars?: number
+  /** Most decoded response characters returned by an exact-URL read. */
+  maxContentChars?: number
+  /** Default maximum records returned by one corpus query. */
+  maxResults?: number
+}
+```
+
+来源：[`packages/builder/tool-builder/src/index.ts:63`](../packages/builder/tool-builder/src/index.ts)
 
 <a id="deepseek-aidsh-tool-fs"></a>
 

@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-这是一个仅提供建议的循环中断器，而非面向模型的工具：它不会出现在工具列表中，不会否决或改写调用，而是监视每个 agent（智能体）的工具调用，识别重复的精确调用或已配置的碎片化根工具序列。达到所配置的连续次数时，它会注入逐级增强的提醒，要求模型改用其他方案、合并工作或结束任务。决定权仍完全属于模型：合理的重复调用既不会延迟，也不会受阻。原始精确匹配设计记录在 [repeat-tool-reminder Agent Note](../../../.agents/notes/archived/feature/2026-07-08-repeat-tool-guard.md) 中；忽略参数的根工具计数记录在 [Code Mode 操作指南 Agent Note](../../../.agents/notes/implemented/bug-fix/2026-08-22-code-mode-operational-guidance.zh.md) 中。
+这是一个循环收敛守卫，而非面向模型的工具。它监视每个 agent（智能体）的精确调用、已配置的根工具序列与连续失败的根调用。配置的阈值会注入逐级增强的提醒；可选的硬预算会在超限调用的正文运行前拒绝该调用。原始精确匹配设计记录在 [repeat-tool-reminder Agent Note](../../../.agents/notes/archived/feature/2026-07-08-repeat-tool-guard.md) 中；忽略参数的根工具计数记录在 [Code Mode 操作指南 Agent Note](../../../.agents/notes/implemented/bug-fix/2026-08-22-code-mode-operational-guidance.zh.md) 中。
 
 ## 配置
 
@@ -15,9 +15,12 @@
     exclude: [todo_write]        # tool-name patterns transparent to the chain
     countByTool: [run_code, bash] # root tools counted by name regardless of arguments
     argumentsPreviewChars: 500   # default; cap on arguments quoted in the detailed reminder
+    maxExactRepeats: 4           # deny a fifth identical root call; 0 disables
+    maxConsecutiveByTool: 80     # deny a later name-counted root call; 0 disables
+    maxConsecutiveFailures: 12   # deny later root calls until user input; 0 disables
 ```
 
-插件加载时，`thresholds` 会对错误配置快速失败：空列表、非整数、小于 2 的值或重复值都会抛出错误，绝不静默回退到默认值；`argumentsPreviewChars` 同样只接受大于等于 1 的整数。系统会将列表按升序规范化；第一个阈值只发送简短的通用提醒，后续每个阈值都会发送详细版本，列出工具、连续次数和规范参数。参数内容截取前 `argumentsPreviewChars` 个字符，并附带省略字符数标记，避免循环中的 `write`／`edit` 载荷无限制进入下一次请求（链键始终比较完整的规范字符串；此上限只约束提醒，不影响检测）。
+插件加载时，`thresholds` 会对错误配置快速失败：空列表、非整数、小于 2 的值或重复值都会抛出错误，绝不静默回退到默认值；`argumentsPreviewChars` 同样只接受大于等于 1 的整数。每个硬预算必须为 `0` 或正整数。系统会将提醒列表按升序规范化；第一个阈值只发送简短的通用提醒，后续每个阈值都会发送详细版本，列出工具、连续次数和有界参数预览。
 
 `include`、`exclude` 与 `countByTool` 条目支持 `*` 通配符，并针对调用时实际存在的工具执行谓词判断，而不是引用注册表条目。因此，与当前任何已注册工具都不匹配的模式并非错误（未加载 MCP 工具的部署中，`exclude: [mcp_*]` 仍然有效）；这与 `toolOrder` 的引用目标检查不同。`countByTool` 默认为 `[]`；基础 bundle 将其设为 `[run_code, bash]`，使不断变化的 wrapper 程序和 shell 探测命令都会收到合并提醒。
 
@@ -29,13 +32,14 @@
 
 - **不受跟踪的调用对链透明。** 被 `include`／`exclude` 排除的调用既不递增计数器，也不重置计数器；因此，`grep X → todo_write → grep X` 仍算作连续两次 `grep X`，即使 `todo_write` 已被排除。这正是排除机制的价值：循环中穿插的记录类工具不能掩盖循环。
 - **被拒绝的调用也计数。** 检测位于 `tools/post-execute`；即便调用被 `tools/pre-execute` 监听器拒绝，该事件也会运行。模型反复尝试被拒绝的调用，恰恰是需要打断的循环。
+- **硬预算在分发前生效。** `maxExactRepeats` 与 `maxConsecutiveByTool` 会在下一次根调用前检查已经完成的链，因此超出预算的正文不会运行。`maxConsecutiveFailures` 跨工具名统计失败的根调用结果，并拒绝后续根调用，直到用户提示词重置该 agent 状态。
 - **忽略没有 agent 的调用。** 直接调用 `ctx.tools.execute()` 的调用方没有需要提醒的模型，也没有可作为键的活跃 agent 对象。
 - **按 agent 分键。** 工具注册表位于上下文层级，subagent 会交错通过同一个 waterfall（瀑布式事件），因此每条链使用 `WeakMap<Agent, Chain>`，以活跃 agent 对象为键。一个 agent 的重复调用绝不会触发另一个 agent 的提醒。用户提示词（`agent/pre-step`）会重置提交该提示词的 agent 链；对象生命周期会自然限制弱引用条目的寿命，无需 dispose（资源释放）监听器。
 - **仅驻留内存。** 从持久化恢复的会话会从一条全新的链开始：guard 是启发式提醒，并非有日志记录的不变量；提醒会延后，这是可接受的代价。
 
 ## 提醒传递
 
-提醒通过 post-execute 决策中的 `additionalContexts`（来源为 `{kind: 'plugin', plugin: 'repeat-tool-reminder'}`）传递，绝不替换 `content`；用于审计的 `tool/result` 事件仍保留工具自己的输出。循环会缓冲这段上下文，并在该步骤的工具结果之后将其作为注入的 `user/message` 追加；会话会将它渲染为普通的合成用户消息。因此，提醒对模型可见、带有来源归属，并且无需增加会话事件即可从会话日志重建。guard 始终通过 `next()` 委派，并将自己的提醒放在下游决策的上下文数组之前（两种结果都适用：被阻止的调用也会收到提醒）；每个条目保留自己的来源和元数据。
+提醒通过 post-execute 决策中的 `additionalContexts`（来源为 `{kind: 'plugin', plugin: 'repeat-tool-reminder'}`）传递，绝不替换 `content`；用于审计的 `tool/result` 事件仍保留工具自己的输出。硬预算拒绝使用普通的 `tools/pre-execute` 拒绝结果，因此持久化的失败工具结果会说明超出的预算与修正方向，并将未运行的正文保留为可审计结果。
 
 ## 模型体验
 
@@ -126,11 +130,24 @@ The calls may use different arguments, but the sequence is still fragmented. Con
 
 仅追加；新出现的内容位于可复用请求前缀之后，不会使现有 KV Cache 条目失效。
 
+### 硬预算拒绝
+
+#### 模型看到的内容
+
+被拒绝的工具结果会说明已耗尽的精确重复、按名称计数或连续失败预算，并要求模型更换方案、结束任务或等待新的用户输入。用户提示词会重置该 agent 的全部三个计数器。
+
+#### Token 影响
+
+简短的失败结果会追加到历史；被拒绝的工具正文不会产生结果载荷。
+
+#### KV Cache 影响
+
+仅追加；拒绝结果位于可复用请求前缀之后。
+
 ## 已知限制与暂缓事项
 
 - **精确匹配仍是默认行为**：规范化过程会对键进行深度排序，因此近似变体可以绕过普通链。`countByTool` 仅有意扩展已配置的根工具；在没有需求证据前，不采用模糊匹配。
 - **压缩（compaction）不会重置链**：跨越压缩检查点的链会继续计数。
-- **仅提供建议**：尚未实现达到较高阈值后升级为 `block`，但 `PostToolDecision` 已支持阻止调用。
 - **subagent 之间不共享链**：链始终按 agent 隔离；即使父 agent 与其 subagent 重复相同调用，也不会合并计数。
 - **合理的幂等轮询超过阈值后仍会收到提醒**：可通过 `thresholds`／`exclude` 配置释放压力。
-- **超过最高阈值后链不再提醒**：提醒只在精确达到所配置的次数时触发，超过后不会继续发送。
+- **硬预算只检查语法进展**：成功会重置失败计数，即使语义上没有进展；参数变化也能绕过精确重复强制限制。按工具名计数的上限是针对选定根工具的更广控制。

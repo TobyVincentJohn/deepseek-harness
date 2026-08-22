@@ -1,28 +1,31 @@
 /**
- * Replay-safe, model-free tool-result pruning service.
+ * Replay-safe, model-free tool-input and tool-result pruning service.
  *
  * @module @deepseek-ai/dsh-compaction-tool-result-pruner
  */
 
+import { createHash } from 'node:crypto'
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { freezeMessage } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type { CallId, ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { Session, SessionEvent, ToolResultMessage } from '@deepseek-ai/dsh-session'
 // Type-only: the `compaction/*` SessionEventMap merges (the shadow-price event).
 import type {} from '@deepseek-ai/dsh-compaction'
 // Type-only: the `ctx.tokenMeter` Context merge for the declared injection.
 import type {} from '@deepseek-ai/dsh-token-meter'
-import { codePointLength, DEFAULTS, PRUNE_MARKER, resolveConfig } from './config.ts'
+import { codePointLength, DEFAULTS, INPUT_PRUNE_MARKER, PRUNE_MARKER, resolveConfig } from './config.ts'
 import type {
+  PrunedInputEntry,
   PrunedEntry,
   PruneResult,
   ResolvedConfig,
   ToolResultPruneConfig,
 } from './types.ts'
 
-export { codePointLength, DEFAULTS, PRUNE_MARKER, resolveConfig } from './config.ts'
+export { codePointLength, DEFAULTS, INPUT_PRUNE_MARKER, PRUNE_MARKER, resolveConfig } from './config.ts'
 export type {
+  PrunedInputEntry,
   PrunedEntry,
   PruneResult,
   ResolvedConfig,
@@ -40,7 +43,12 @@ interface SnapshotCandidate {
   readonly event: SessionEvent<'tool/result'>
 }
 
-/** Deterministic head/middle/tail pruning for current tool-result surface nodes. */
+interface InputSnapshotCandidate {
+  readonly seq: number
+  readonly event: SessionEvent<'assistant/message'>
+}
+
+/** Deterministic head/middle/tail pruning for current tool-interaction surface nodes. */
 export class ToolResultPruner extends Service {
   // The token meter prices each shadowed node for its logged shadow-price
   // event, so pruning genuinely requires the pricing capability.
@@ -50,6 +58,8 @@ export class ToolResultPruner extends Service {
     thresholdChars: z.number().step(1).min(1).default(DEFAULTS.thresholdChars),
     headChars: z.number().step(1).min(0).default(DEFAULTS.headChars),
     tailChars: z.number().step(1).min(0).default(DEFAULTS.tailChars),
+    inputThresholdChars: z.number().step(1).min(1).default(DEFAULTS.inputThresholdChars),
+    inputPreviewChars: z.number().step(1).min(0).default(DEFAULTS.inputPreviewChars),
   })
 
   /** Resolved and immutable character budgets. */
@@ -122,9 +132,38 @@ export class ToolResultPruner extends Service {
   }
 
   /**
-   * Prune every over-budget tool result from one stable current-surface snapshot.
-   * Each replacement preserves the complete event data except for `content`,
-   * cites the shadowed node so replay can recover the replacement input, and is
+   * Replace an oversized raw tool-call argument string with valid JSON carrying
+   * its digest, original size, and a bounded head/tail preview.
+   * @param argumentsJson - raw assistant tool-call arguments.
+   * @returns bounded replacement JSON, or `null` when already within budget.
+   */
+  pruneArguments(argumentsJson: string): string | null {
+    const charsBefore = codePointLength(argumentsJson)
+    if (charsBefore <= this.config.inputThresholdChars) return null
+    const points = Array.from(argumentsJson)
+    const headChars = Math.ceil(this.config.inputPreviewChars / 2)
+    const tailChars = Math.floor(this.config.inputPreviewChars / 2)
+    const preview = points.slice(0, headChars).join('')
+      + INPUT_PRUNE_MARKER
+      + (tailChars === 0 ? '' : points.slice(-tailChars).join(''))
+    const replacement = JSON.stringify({
+      _dsh_pruned_tool_input: {
+        sha256: createHash('sha256').update(argumentsJson, 'utf8').digest('hex'),
+        characters: charsBefore,
+        preview,
+      },
+    })
+    /* v8 ignore next 3 -- resolved config keeps preview plus conservative JSON overhead below the trigger threshold. */
+    if (codePointLength(replacement) >= charsBefore) {
+      throw new Error('tool-input prune: replacement must be smaller than the original arguments')
+    }
+    return replacement
+  }
+
+  /**
+   * Prune every over-budget tool input and result from one stable surface snapshot.
+   * Each replacement preserves the complete event data except for its bounded
+   * model-visible content, cites the shadowed node for replay recovery, and is
    * immediately preceded by a `compaction/prune` shadow-price event pricing the
    * shadowed node through the injected token meter, so pure consumers can
    * subtract it without per-node state.
@@ -135,14 +174,53 @@ export class ToolResultPruner extends Service {
    */
   pruneSession(session: Session): PruneResult {
     const candidates: SnapshotCandidate[] = []
+    const inputCandidates: InputSnapshotCandidate[] = []
     for (const seq of [...session.surface.nodes]) {
       const event = session.events[seq]
       /* v8 ignore next -- surface seqs are validated contiguous log references. */
       if (event?.type === 'tool/result') candidates.push({ seq, event })
+      else if (event?.type === 'assistant/message') inputCandidates.push({ seq, event })
     }
 
     const pruned: PrunedEntry[] = []
+    const prunedInputs: PrunedInputEntry[] = []
     let charsRemoved = 0
+    for (const { seq, event } of inputCandidates) {
+      const callIds: CallId[] = []
+      let charsBefore = 0
+      let charsAfter = 0
+      const content = event.data.message.content.map((block) => {
+        if (block.type !== 'tool-call') return block
+        const argumentsJson = this.pruneArguments(block.arguments)
+        if (argumentsJson === null) return block
+        callIds.push(block.id)
+        charsBefore += codePointLength(block.arguments)
+        charsAfter += codePointLength(argumentsJson)
+        return { ...block, arguments: argumentsJson }
+      })
+      if (callIds.length === 0) continue
+      const message = freezeMessage({ ...event.data.message, content })
+      session.append('compaction/prune', {
+        shadowedRange: { start: seq, end: seq },
+        shadowedSeqs: [seq],
+        shadowedTokenCount: this.ctx.tokenMeter.estimateMessage(event.data.message),
+      })
+      const replacement = session.append('assistant/message', {
+        ...event.data,
+        message,
+      }, {
+        surfaceOp: { op: 'replace', start: seq, end: seq },
+        sourceEventSeqs: [seq],
+      })
+      prunedInputs.push({
+        originalSeq: seq,
+        replacementSeq: replacement.seq,
+        callIds,
+        charsBefore,
+        charsAfter,
+      })
+      charsRemoved += charsBefore - charsAfter
+    }
     for (const { seq, event } of candidates) {
       const result = event.data.message.content[0]
       const content = this.pruneContent(result.content)
@@ -180,7 +258,7 @@ export class ToolResultPruner extends Service {
       })
       charsRemoved += charsBefore - charsAfter
     }
-    return { pruned, charsRemoved }
+    return { pruned, prunedInputs, charsRemoved }
   }
 }
 

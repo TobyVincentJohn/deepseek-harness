@@ -160,6 +160,8 @@
         thresholdChars: 8192
         headChars: 4096
         tailChars: 1024
+        inputThresholdChars: 8192
+        inputPreviewChars: 512
 
 # ── delegation and workflows ────────────────────────────────────────────────
 

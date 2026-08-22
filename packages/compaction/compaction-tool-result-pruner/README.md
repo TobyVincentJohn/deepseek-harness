@@ -2,13 +2,15 @@
 
 English | [中文](README.zh.md)
 
-The replay-safe model-free pruning service (`ctx.toolResultPruner`). It rewrites over-budget `tool/result` surface nodes to a bounded head, a fixed omission marker, and a bounded tail while retaining the full original event in the append-only session log.
+The replay-safe model-free pruning service (`ctx.toolResultPruner`). It rewrites over-budget `tool/result` text and assistant tool-call argument strings while retaining every full original event in the append-only session log.
 
 This is a concrete companion to [`dsh-compaction-basic`](../compaction-basic/README.md), not a compaction backend or model-facing tool. Compact-basic reads it through optional `ctx.get('toolResultPruner')`, so either package remains independently composable.
 
 ## Service API
 
-`pruneSession(session)` scans one stable snapshot of the current surface. Every over-budget tool result is replaced by one newly appended `tool/result` carrying `{ surfaceOp: { op: 'replace', start: originalSeq, end: originalSeq }, sourceEventSeqs: [originalSeq] }`. The replacement spreads the complete original data and changes only `content`, preserving `turn`, `step`, `callId`, error fields, `meta`, and later data additions. The original event remains available for persistence, replay, and exact-log inspection.
+`pruneSession(session)` scans one stable snapshot of the current surface. Every over-budget tool result is replaced by one newly appended `tool/result`; an assistant message containing over-budget tool-call arguments is replaced by one newly appended `assistant/message`. Each replacement targets only its original node and cites that node through `sourceEventSeqs`. Original events remain available for persistence, replay, and exact-log inspection.
+
+Tool-call arguments above `inputThresholdChars` become valid JSON containing the original Unicode-code-point count, a SHA-256 digest, and a bounded head/tail preview separated by `[... tool input middle pruned ...]`. Tool name and call id stay unchanged, so the retained result remains paired with the bounded historical call. `prunedInputs` reports each assistant replacement and its affected call ids.
 
 The method throws synchronously when the session rejects a replacement. Replacements committed earlier in the pass remain durable.
 
@@ -25,8 +27,10 @@ Unrecognized keys fail at plugin construction. Resolved config is detached and d
 | `thresholdChars` | no (default `8192`) | Prune when combined text exceeds this many Unicode code points. |
 | `headChars` | no (default `4096`) | Leading Unicode code points retained. |
 | `tailChars` | no (default `1024`) | Trailing Unicode code points retained. |
+| `inputThresholdChars` | no (default `8192`) | Replace a tool-call argument string above this many Unicode code points. |
+| `inputPreviewChars` | no (default `512`) | Argument code points retained across the replacement's head and tail preview. |
 
-All values are integers; the threshold is positive and head/tail are non-negative. `headChars + marker + tailChars` must fit within `thresholdChars`, so a valid configuration can prune every over-budget result without growth or repeated rewriting.
+All values are integers; thresholds are positive and retention values are non-negative. Each configured replacement must fit below its triggering threshold, so pruning never grows a node and a second pass emits no replacement.
 
 ## Usage
 
@@ -45,11 +49,11 @@ export function apply(ctx: Context): void {
 
 #### What the model sees
 
-Once a compaction trigger qualifies, future requests see the retained head, `\n\n[... tool result middle pruned ...]\n\n`, and retained tail in place of the removed text. Rich blocks keep their order. The model does not see a second copy of the original.
+Once a compaction trigger qualifies, future requests see the retained result head/tail and bounded digest-bearing JSON in place of oversized tool-call arguments. Rich result blocks and tool call ids keep their order. The model does not see a second copy of either original.
 
 #### Token effect
 
-Each rewritten tool result has at most `thresholdChars` text code points. Pruning itself makes no model call; compaction-basic skips summarization when the remeasured request falls below pressure, otherwise the summarizer reads the pruned surface.
+Each rewritten tool result has at most `thresholdChars` text code points, and each rewritten tool input is smaller than its triggering argument string. Pruning itself makes no model call; compaction-basic skips summarization when the remeasured request falls below pressure, otherwise the summarizer reads the pruned surface.
 
 #### KV Cache effect
 

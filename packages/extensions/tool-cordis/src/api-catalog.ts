@@ -2051,8 +2051,8 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
   },
   {
     key: 'toolResultPruner',
-    summary: 'Deterministic head/middle/tail pruning for current tool-result surface nodes.',
-    description: 'Deterministic head/middle/tail pruning for current tool-result surface nodes.',
+    summary: 'Deterministic head/middle/tail pruning for current tool-interaction surface nodes.',
+    description: 'Deterministic head/middle/tail pruning for current tool-interaction surface nodes.',
     methods: [
       {
         signature: 'readonly config: ResolvedConfig',
@@ -2072,8 +2072,14 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'pruned content, or `null` when the text is within budget.',
       },
       {
+        signature: 'pruneArguments(argumentsJson: string): string | null',
+        description: 'Replace an oversized raw tool-call argument string with valid JSON carrying its digest, original size, and a bounded head/tail preview.',
+        parameters: [{ name: 'argumentsJson', description: 'raw assistant tool-call arguments.' }],
+        returns: 'bounded replacement JSON, or `null` when already within budget.',
+      },
+      {
         signature: 'pruneSession(session: Session): PruneResult',
-        description: 'Prune every over-budget tool result from one stable current-surface snapshot. Each replacement preserves the complete event data except for `content`, cites the shadowed node so replay can recover the replacement input, and is immediately preceded by a `compaction/prune` shadow-price event pricing the shadowed node through the injected token meter, so pure consumers can subtract it without per-node state.',
+        description: 'Prune every over-budget tool input and result from one stable surface snapshot. Each replacement preserves the complete event data except for its bounded model-visible content, cites the shadowed node for replay recovery, and is immediately preceded by a `compaction/prune` shadow-price event pricing the shadowed node through the injected token meter, so pure consumers can subtract it without per-node state.',
         parameters: [{ name: 'session', description: 'session whose current surface is rewritten.' }],
         returns: 'landed replacements and aggregate Unicode-code-point savings.',
         throws: ['when the session rejects a replacement; replacements committed earlier in the pass remain durable.'],
@@ -3890,8 +3896,12 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PrunedEntry {\n    readonly originalSeq: number;\n    readonly replacementSeq: number;\n    readonly callId: CallId;\n    readonly charsBefore: number;\n    readonly charsAfter: number;\n}',
   },
   {
+    name: 'PrunedInputEntry',
+    declaration: 'export interface PrunedInputEntry {\n    readonly originalSeq: number;\n    readonly replacementSeq: number;\n    readonly callIds: readonly CallId[];\n    readonly charsBefore: number;\n    readonly charsAfter: number;\n}',
+  },
+  {
     name: 'PruneResult',
-    declaration: 'export interface PruneResult {\n    readonly pruned: readonly PrunedEntry[];\n    readonly charsRemoved: number;\n}',
+    declaration: 'export interface PruneResult {\n    readonly pruned: readonly PrunedEntry[];\n    readonly prunedInputs: readonly PrunedInputEntry[];\n    readonly charsRemoved: number;\n}',
   },
   {
     name: 'ReadFileLine',

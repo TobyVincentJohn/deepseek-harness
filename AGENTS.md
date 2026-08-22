@@ -20,6 +20,7 @@ packages/    @deepseek-ai/dsh-<pkg> workspaces at packages/<group>/<pkg>/
   subprocess/  subprocess capability + local process-tree provider
   terminal/         persistent sessions
   fs/          filesystem capability + policy
+  builder/     offline-corpus inspection + synthetic task-package validation tools
   lsp/         language-server capability
   skill/       skill provider registry + local impl + catalog/loader tool
   web/         web capability: Service Definition + search/fetch providers + tool Consumer

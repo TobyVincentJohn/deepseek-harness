@@ -87,9 +87,9 @@ type ManualCompactionErrorCode =
 
 该 Service Definition 导出 `toolPairingBalancedBefore(session, seq)` 与 `toolPairingBalancedAfter(session, seq)`，用于检查 seq 之前与之后的工具调用/结果配对。两者都会验证当前 surface 成员关系，并拒绝缺失的 seq 与遗留结果；[包约定](../../packages/compaction/compaction/README.zh.md#tool-pairing-boundaries)定义其缓存行为。
 
-## 工具结果剪枝产出
+## 工具交互剪枝产出
 
-可选的工具结果剪枝服务会报告每次持久内容替换以及 Unicode code point 的总减少量。其公开结果类型位于 [`compaction-tool-result-pruner/src/types.ts`](../../packages/compaction/compaction-tool-result-pruner/src/types.ts)。
+可选的工具交互剪枝服务会报告每次持久输入或结果替换以及 Unicode code point 的总减少量。其公开结果类型位于 [`compaction-tool-result-pruner/src/types.ts`](../../packages/compaction/compaction-tool-result-pruner/src/types.ts)。
 
 ```ts type-equiv
 /** Cited source event and size accounting for one landed surface replacement. */
@@ -112,6 +112,8 @@ interface PrunedEntry {
 interface PruneResult {
   /** Replacements in the snapshotted surface order. */
   readonly pruned: readonly PrunedEntry[]
+  /** Oversized assistant tool-call input replacements. */
+  readonly prunedInputs: readonly PrunedInputEntry[]
   /** Total Unicode code points removed across replacements. */
   readonly charsRemoved: number
 }
@@ -198,7 +200,7 @@ Source: [`packages/compaction/compaction/src/index.ts`](../../packages/compactio
 
 ### `ctx.toolResultPruner` — `ToolResultPruner`
 
-Deterministic head/middle/tail pruning for current tool-result surface nodes.
+Deterministic head/middle/tail pruning for current tool-interaction surface nodes.
 
 ```ts cordis-catalog
 /**
@@ -218,9 +220,17 @@ measureContent(blocks: readonly ContentBlock[]): number
 pruneContent(blocks: readonly ContentBlock[]): ContentBlock[] | null
 
 /**
- * Prune every over-budget tool result from one stable current-surface snapshot.
- * Each replacement preserves the complete event data except for `content`,
- * cites the shadowed node so replay can recover the replacement input, and is
+ * Replace an oversized raw tool-call argument string with valid JSON carrying
+ * its digest, original size, and a bounded head/tail preview.
+ * @param argumentsJson - raw assistant tool-call arguments.
+ * @returns bounded replacement JSON, or `null` when already within budget.
+ */
+pruneArguments(argumentsJson: string): string | null
+
+/**
+ * Prune every over-budget tool input and result from one stable surface snapshot.
+ * Each replacement preserves the complete event data except for its bounded
+ * model-visible content, cites the shadowed node for replay recovery, and is
  * immediately preceded by a `compaction/prune` shadow-price event pricing the
  * shadowed node through the injected token meter, so pure consumers can
  * subtract it without per-node state.

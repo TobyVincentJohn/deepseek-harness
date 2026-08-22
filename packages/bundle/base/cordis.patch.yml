@@ -363,6 +363,8 @@
         thresholdChars: 8192
         headChars: 4096
         tailChars: 1024
+        inputThresholdChars: 8192
+        inputPreviewChars: 512
 
     - id: tool-todo
       name: '@deepseek-ai/dsh-tool-todo'
@@ -393,6 +395,9 @@
         thresholds: [3, 5, 8]
         countByTool: [run_code, bash]
         argumentsPreviewChars: 500
+        maxExactRepeats: 4
+        maxConsecutiveByTool: 80
+        maxConsecutiveFailures: 12
 
     # Every mode enables the stable model-facing web_search tool. DeepSeek search
     # resolves the same DEEPSEEK_API_KEY credential the Models page manages for

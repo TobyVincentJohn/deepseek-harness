@@ -1,8 +1,7 @@
 /**
- * Advisory per-agent repeat-call detector. It enriches post-execute decisions
- * with logged model context without vetoing or rewriting calls. Configuration
- * and chain semantics live in the package README; rationale lives in the
- * repeat-tool-reminder Agent Note.
+ * Per-agent convergence guard. It enriches post-execute decisions with logged
+ * model context and can deny calls after configured repeat or failure budgets.
+ * Configuration and chain semantics live in the package README.
  * @module @deepseek-ai/dsh-repeat-tool-reminder
  */
 
@@ -12,7 +11,7 @@ import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { MessageSource } from '@deepseek-ai/dsh-llm'
 import type { UserMessage } from '@deepseek-ai/dsh-session'
-import type { PostToolDecision, ToolExecution } from '@deepseek-ai/dsh-tools'
+import type { PostToolDecision, PreToolDecision, ToolExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 
 export const name = 'repeat-tool-reminder'
 
@@ -47,6 +46,12 @@ export interface Config {
    * always compares the FULL canonical string).
    */
   argumentsPreviewChars?: number
+  /** Maximum completed identical root calls before later repeats are denied; `0` disables enforcement. */
+  maxExactRepeats?: number
+  /** Maximum consecutive root calls for a `countByTool` match; `0` disables enforcement. */
+  maxConsecutiveByTool?: number
+  /** Maximum consecutive failed root calls before later root calls are denied; `0` disables enforcement. */
+  maxConsecutiveFailures?: number
 }
 
 export const Config: z<Config> = z.object({
@@ -55,6 +60,9 @@ export const Config: z<Config> = z.object({
   exclude: z.array(z.string()).default([]),
   countByTool: z.array(z.string()).default([]),
   argumentsPreviewChars: z.number().default(500),
+  maxExactRepeats: z.number().default(0),
+  maxConsecutiveByTool: z.number().default(0),
+  maxConsecutiveFailures: z.number().default(0),
 })
 
 /**
@@ -179,6 +187,14 @@ interface Chain {
   count: number
 }
 
+/** Validate a disabled-or-positive convergence budget. */
+function validateBudget(name: string, value: number): number {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`repeat-tool-reminder: invalid ${name} ${value} — must be 0 or a positive integer`)
+  }
+  return value
+}
+
 /**
  * Install the guard's listeners.
  * @param ctx - plugin context; listeners are scoped to it and disposed with it.
@@ -195,9 +211,17 @@ export function apply(ctx: Context, config: Config): void {
   if (!Number.isInteger(argumentsPreviewChars) || argumentsPreviewChars < 1) {
     throw new Error(`repeat-tool-reminder: invalid argumentsPreviewChars ${argumentsPreviewChars} — must be an integer >= 1`)
   }
+  const maxExactRepeats = validateBudget('maxExactRepeats', config.maxExactRepeats as number)
+  const maxConsecutiveByTool = validateBudget('maxConsecutiveByTool', config.maxConsecutiveByTool as number)
+  const maxConsecutiveFailures = validateBudget('maxConsecutiveFailures', config.maxConsecutiveFailures as number)
 
   const exactChains = new WeakMap<Agent, Chain>()
+  // Enforcement tracks exact root calls independently from reminder mode.
+  // A tool configured in `countByTool` still needs the tighter exact-repeat
+  // budget when its arguments do not change.
+  const exactRootChains = new WeakMap<Agent, Chain>()
   const rootToolChains = new WeakMap<Agent, Chain>()
+  const failureCounts = new WeakMap<Agent, number>()
 
   /** Whether a tool participates in the chain (untracked calls are transparent: they neither count nor reset). */
   function tracked(toolName: string): boolean {
@@ -208,6 +232,40 @@ export function apply(ctx: Context, config: Config): void {
   /** Whether a root call is counted by name instead of exact arguments. */
   function countsByTool(toolName: string): boolean {
     return countByToolPatterns.some(pattern => pattern.test(toolName))
+  }
+
+  /** Deny a root call whose next execution would exceed a configured budget. */
+  function convergenceDenial(exec: ToolExecution): string | undefined {
+    if (exec.agent === undefined || exec.parent !== undefined || !tracked(exec.name)) return undefined
+    const failures = failureCounts.get(exec.agent) ?? 0
+    if (maxConsecutiveFailures > 0 && failures >= maxConsecutiveFailures) {
+      return `Convergence guard blocked further tool use after ${failures} consecutive failed calls. Stop the tool loop and report the blocker, or wait for new user input.`
+    }
+    if (countsByTool(exec.name)) {
+      const chain = rootToolChains.get(exec.agent)
+      if (maxConsecutiveByTool > 0 && chain?.key === exec.name && chain.count >= maxConsecutiveByTool) {
+        return `Convergence guard blocked ${exec.name}: it already ran ${chain.count} times consecutively. Consolidate the remaining work into a different action or finish.`
+      }
+    }
+    const canonical = canonicalize(exec.arguments)
+    const key = JSON.stringify([exec.name, canonical])
+    const chain = exactRootChains.get(exec.agent)
+    if (maxExactRepeats > 0 && chain?.key === key && chain.count >= maxExactRepeats) {
+      return `Convergence guard blocked an identical ${exec.name} call after ${chain.count} consecutive attempts. Change the arguments or approach; do not retry the same call.`
+    }
+    return undefined
+  }
+
+  /** Track whether root tool execution is converging through successful outcomes. */
+  function observeOutcome(exec: ToolExecution, result: Readonly<ToolExecutionResult>): void {
+    if (exec.agent === undefined || exec.parent !== undefined || !tracked(exec.name)) return
+    const canonical = canonicalize(exec.arguments)
+    const exactKey = JSON.stringify([exec.name, canonical])
+    const exactChain = exactRootChains.get(exec.agent)
+    const exactCount = exactChain !== undefined && exactChain.key === exactKey ? exactChain.count + 1 : 1
+    exactRootChains.set(exec.agent, { key: exactKey, count: exactCount })
+    if (result.isError) failureCounts.set(exec.agent, (failureCounts.get(exec.agent) ?? 0) + 1)
+    else failureCounts.delete(exec.agent)
   }
 
   /**
@@ -253,12 +311,17 @@ export function apply(ctx: Context, config: Config): void {
     })
   }
 
-  // Observe-and-enrich, never veto: count first (state advances regardless of
-  // the downstream outcome), DELEGATE so a later listener can still block or
-  // replace, then fold the reminder onto whatever came back — additionalContexts
-  // rides both decision variants, so a blocked call still gets the nudge.
-  ctx.on('tools/post-execute', async (exec, _result, next): Promise<PostToolDecision> => {
+  ctx.on('tools/pre-execute', async (exec, next): Promise<PreToolDecision> => {
+    const reason = convergenceDenial(exec)
+    if (reason !== undefined) return { kind: 'deny', reason }
+    return await next()
+  })
+
+  // Count every settled attempt, including a pre-execute denial, then fold a
+  // reminder onto the downstream decision without replacing the tool result.
+  ctx.on('tools/post-execute', async (exec, result, next): Promise<PostToolDecision> => {
     const reminder = observe(exec)
+    observeOutcome(exec, result)
     const downstream = await next()
     if (!reminder) return downstream
     if (downstream.kind === 'block') {
@@ -276,7 +339,9 @@ export function apply(ctx: Context, config: Config): void {
   ctx.on('agent/pre-step', ({ agent, messages }, next): Promise<PreStepDecision> => {
     if (messages.some(message => message.source.kind === 'user')) {
       exactChains.delete(agent)
+      exactRootChains.delete(agent)
       rootToolChains.delete(agent)
+      failureCounts.delete(agent)
     }
     return next()
   })

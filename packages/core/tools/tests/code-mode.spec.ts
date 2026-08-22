@@ -133,6 +133,9 @@ describe('mode-aware wire contribution', () => {
     expect(sdk?.text).toContain('declare const tools: {')
     expect(sdk?.text).toContain('echo: {')
     expect(sdk?.text).not.toContain('run_code:')
+    expect(sdk?.text).toContain('Each invocation starts with fresh in-memory state')
+    expect(sdk?.text).toContain('Batch deterministic work into one program')
+    expect(sdk?.text).toContain('A bare tool call does not emit its result')
   })
 
   it("mode 'code' states the run_code-only rule BEFORE the per-tool guidance that names each tool", async () => {
@@ -374,6 +377,9 @@ describe('mode-aware wire contribution', () => {
     expect(sdk?.text).toContain('class Tools(Protocol):')
     expect(sdk?.text).toContain('async def echo(self, args:')
     expect(sdk?.text).toContain('top-level `await`')
+    expect(sdk?.text).toContain('Each invocation starts with fresh in-memory state')
+    expect(sdk?.text).toContain('Batch deterministic work into one program')
+    expect(sdk?.text).toContain('A bare tool call does not emit its result')
   })
 
   it("assembles under a python runtime in mode 'both' as well, SDK and schema together", async () => {
@@ -399,6 +405,8 @@ describe('mode-aware wire contribution', () => {
     const runCodeSchema = assembly.tools.find(tool => tool.name === RUN_CODE_NAME)
     expect(runCodeSchema?.description).toContain('Execute a TypeScript program')
     expect(runCodeSchema?.description).toContain('BODY of an')
+    expect(runCodeSchema?.description).toContain('Batch deterministic work into one program')
+    expect(runCodeSchema?.description).toContain('fresh in-memory state')
     // Both required arguments are named here, not only in the parameter
     // schema: prose that describes the call as "pass the program" is what
     // leads a model to emit `{code}` alone and fail INVALID_ARGS.
@@ -414,6 +422,8 @@ describe('mode-aware wire contribution', () => {
     const runCodeSchema = assembly.tools.find(tool => tool.name === RUN_CODE_NAME)
     expect(runCodeSchema?.description).toContain('Execute a Python program')
     expect(runCodeSchema?.description).toContain('`return <value>`')
+    expect(runCodeSchema?.description).toContain('Batch deterministic work into one program')
+    expect(runCodeSchema?.description).toContain('fresh in-memory state')
     expect(runCodeSchema?.description).toContain('`description`')
     expect(runCodeSchema?.description).not.toContain('TypeScript')
     const codeParam = (runCodeSchema?.parameters as { properties: { code: { description: string } } }).properties.code

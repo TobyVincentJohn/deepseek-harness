@@ -49,7 +49,8 @@ const TYPESCRIPT_FLAVOR: RunCodeFlavor = {
     + 'arguments: `code`, the BODY of an async function (erasable syntax only; top-level '
     + '`await` and `return` work), and `description`, a short summary of what the program '
     + 'does. Call tools as `await tools.name(args)` per the declarations in the system '
-    + 'prompt. Only what you print or return is program output — curate it. Image-bearing '
+    + 'prompt. Batch deterministic work into one program; each run starts with fresh '
+    + 'in-memory state. Only what you print or return is program output — curate it. Image-bearing '
     + 'subtool results are attached after the run.',
   codeDescription: 'The program: the body of an async TypeScript function.',
 }
@@ -64,7 +65,8 @@ const PYTHON_FLAVOR: RunCodeFlavor = {
     'Execute a Python program against the available tools. Takes two required '
     + 'arguments: `code`, the BODY of an async function (top-level `await` and `return` '
     + 'work), and `description`, a short summary of what the program does. Call tools as '
-    + '`await tools.name(args)` per the declarations in the system prompt. Use '
+    + '`await tools.name(args)` per the declarations in the system prompt. Batch '
+    + 'deterministic work into one program; each run starts with fresh in-memory state. Use '
     + '`print(...)` and/or `return <value>` for program output — curate it. Image-bearing '
     + 'subtool results are attached after the run.',
   codeDescription: 'The program: the body of an async Python function.',

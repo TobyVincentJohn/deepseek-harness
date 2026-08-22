@@ -407,12 +407,15 @@ describe('mode-aware wire contribution', () => {
     expect(runCodeSchema?.description).toContain('BODY of an')
     expect(runCodeSchema?.description).toContain('Batch deterministic work into one program')
     expect(runCodeSchema?.description).toContain('fresh in-memory state')
+    expect(runCodeSchema?.description).toContain('do not use Node module or `process` APIs')
+    expect(runCodeSchema?.description).toContain('Honor read-only requests')
     // Both required arguments are named here, not only in the parameter
     // schema: prose that describes the call as "pass the program" is what
     // leads a model to emit `{code}` alone and fail INVALID_ARGS.
     expect(runCodeSchema?.description).toContain('`description`')
     const codeParam = (runCodeSchema?.parameters as { properties: { code: { description: string } } }).properties.code
-    expect(codeParam.description).toBe('The program: the body of an async TypeScript function.')
+    expect(codeParam.description).toContain('Use declared tool bindings for task I/O')
+    expect(codeParam.description).toContain('`require` and static `import` are unavailable')
   })
 
   it('emits a Python-flavored run_code schema under a python runtime (matches the SDK language)', async () => {
@@ -458,7 +461,8 @@ describe('mode-aware wire contribution', () => {
     const definition = ctx.tools.get(RUN_CODE_NAME)
     expect(definition?.description).toContain('Execute a TypeScript program')
     const params = definition?.parameters as { properties: { code: { description: string } } }
-    expect(params.properties.code.description).toBe('The program: the body of an async TypeScript function.')
+    expect(params.properties.code.description).toContain('The program: the body of an async TypeScript function.')
+    expect(params.properties.code.description).toContain('`require` and static `import` are unavailable')
   })
 
   it("rejects the assembly when toolOrder names a native tool that mode 'code' no longer contributes", async () => {

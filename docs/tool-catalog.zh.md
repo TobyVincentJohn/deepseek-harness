@@ -126,7 +126,7 @@ ask_user_question 会暂停工具调用，直到当前 UI 提供方返回人类�
 
 ### `run_code`
 
-针对可用工具执行 TypeScript 程序。接受两个必填参数：`code`，即异步函数的**函数体**（仅使用可擦除语法；支持顶层 `await` 和 `return`）；以及 `description`，简要说明该程序做什么。请根据系统提示词中的声明，以 `await tools.name(args)` 形式调用工具。请将确定性工作批量放入一个程序中；每次运行都从全新的内存状态开始。只有打印或返回的内容属于程序输出，请谨慎筛选。含图片的子工具结果会在运行结束后附加。
+针对可用工具执行 TypeScript 程序。接受两个必填参数：`code`，即异步函数的**函数体**（仅使用可擦除语法；支持顶层 `await` 和 `return`）；以及 `description`，简要说明该程序做什么。请根据系统提示词中的声明，以 `await tools.name(args)` 形式调用工具。请将确定性工作批量放入一个程序中；每次运行都从全新的内存状态开始。任务 I/O 应使用已声明的工具绑定，不要使用 Node 模块或 `process` API。嵌套工具也必须遵守只读请求。只有打印或返回的内容属于程序输出，请谨慎筛选。含图片的子工具结果会在运行结束后附加。
 
 ```json
 {
@@ -134,7 +134,7 @@ ask_user_question 会暂停工具调用，直到当前 UI 提供方返回人类�
   "properties": {
     "code": {
       "type": "string",
-      "description": "The program: the body of an async TypeScript function."
+      "description": "The program: the body of an async TypeScript function. Use declared tool bindings for task I/O; `require` and static `import` are unavailable."
     },
     "description": {
       "type": "string",
@@ -185,7 +185,7 @@ ask_user_question 会暂停工具调用，直到当前 UI 提供方返回人类�
 
 ### `bash`
 
-执行 bash 命令（`bash -c`）并返回 stdout/stderr。每次调用都在新 shell 中运行：调用之间不保留任何状态（cwd、变量、函数），请传入 `workdir`，不要使用 `cd`。非零退出会报告为 `[exit code: N]`。当前 harness 环境信息通过托管的 `$DSH_*` 变量公开，需要时请检查这些变量。命令可能在文件沙箱中运行；被阻止的文件操作报告为 `[sandbox: file access denied under <mode> mode]`，这是策略拒绝，而不是命令缺陷，请勿换一种方式重试。较长的输出会截断，只保留尾部；如可用，完整输出会保存到文件并报告其路径。对于长时间运行的命令，请设置 `run_in_background: true`：调用会立即返回 job id；使用 `job_output` 读取输出，使用 `job_kill` 停止任务。
+执行 bash 命令（`bash -c`）并返回 stdout/stderr。每次调用都在新 shell 中运行：调用之间不保留任何状态（cwd、变量、函数），请传入 `workdir`，不要使用 `cd`。非零退出会报告为 `[exit code: N]`。确定性的批量分析应优先使用一个多行脚本或流水线，流式处理输入并输出紧凑汇总。当用户要求只读工作时，不得创建或修改文件；应使用内联脚本与标准流。当前 harness 环境信息通过托管的 `$DSH_*` 变量公开，需要时请检查这些变量。命令可能在文件沙箱中运行；被阻止的文件操作报告为 `[sandbox: file access denied under <mode> mode]`，这是策略拒绝，而不是命令缺陷，请勿换一种方式重试。较长的输出会截断，只保留尾部；如可用，完整输出会保存到文件并报告其路径。对于长时间运行的命令，请设置 `run_in_background: true`：调用会立即返回 job id；使用 `job_output` 读取输出，使用 `job_kill` 停止任务。
 
 ```json
 {
@@ -193,7 +193,7 @@ ask_user_question 会暂停工具调用，直到当前 UI 提供方返回人类�
   "properties": {
     "command": {
       "type": "string",
-      "description": "The bash command to execute."
+      "description": "The bash command to execute. Prefer one multiline script or pipeline for deterministic bulk work instead of several small calls."
     },
     "description": {
       "type": "string",

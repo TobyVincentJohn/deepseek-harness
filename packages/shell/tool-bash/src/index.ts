@@ -74,6 +74,8 @@ function bashDescription(backgroundEnabled: boolean, escalationModes: readonly S
   const base = 'Execute a bash command (`bash -c`) and return its stdout/stderr. '
     + 'Each call runs in a fresh shell: no state (cwd, variables, functions) persists between calls — '
     + 'pass `workdir` instead of using `cd`. Non-zero exits are reported as `[exit code: N]`. '
+    + 'For deterministic bulk analysis, prefer one multiline script or pipeline that streams inputs and emits a compact aggregate. '
+    + 'When the user requests read-only work, do not create or modify files; use inline scripts and standard streams. '
     + `Current harness environment facts are exposed through managed \`$${DSH_ENV_PREFIX}*\` variables; inspect them when needed. `
     + 'Commands may run under a file sandbox; a blocked file operation is reported as `[sandbox: file access denied under <mode> mode]` — a policy denial, not a bug in the command; do not retry another way. '
     + 'Long output is truncated to its tail; the full output is saved to a file whose path is reported when available. '
@@ -243,7 +245,11 @@ export function apply(ctx: Context, config: Config = {}): void {
     name: 'bash',
     description: bashDescription(backgroundEnabled, escalationModes),
     parameters: {
-      command: { type: 'string', required: true, description: 'The bash command to execute.' },
+      command: {
+        type: 'string',
+        required: true,
+        description: 'The bash command to execute. Prefer one multiline script or pipeline for deterministic bulk work instead of several small calls.',
+      },
       description: {
         type: 'string',
         required: true,

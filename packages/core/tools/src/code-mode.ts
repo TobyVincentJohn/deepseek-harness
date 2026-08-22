@@ -50,9 +50,13 @@ const TYPESCRIPT_FLAVOR: RunCodeFlavor = {
     + '`await` and `return` work), and `description`, a short summary of what the program '
     + 'does. Call tools as `await tools.name(args)` per the declarations in the system '
     + 'prompt. Batch deterministic work into one program; each run starts with fresh '
-    + 'in-memory state. Only what you print or return is program output — curate it. Image-bearing '
+    + 'in-memory state. Use declared tool bindings for task I/O; do not use Node module or '
+    + '`process` APIs. Honor read-only requests inside nested tools. Only what you print or '
+    + 'return is program output — curate it. Image-bearing '
     + 'subtool results are attached after the run.',
-  codeDescription: 'The program: the body of an async TypeScript function.',
+  codeDescription:
+    'The program: the body of an async TypeScript function. Use declared tool bindings for '
+    + 'task I/O; `require` and static `import` are unavailable.',
 }
 
 /**
@@ -67,7 +71,8 @@ const PYTHON_FLAVOR: RunCodeFlavor = {
     + 'work), and `description`, a short summary of what the program does. Call tools as '
     + '`await tools.name(args)` per the declarations in the system prompt. Batch '
     + 'deterministic work into one program; each run starts with fresh in-memory state. Use '
-    + '`print(...)` and/or `return <value>` for program output — curate it. Image-bearing '
+    + 'declared tool bindings for task I/O and honor read-only requests inside nested tools. '
+    + 'Use `print(...)` and/or `return <value>` for program output — curate it. Image-bearing '
     + 'subtool results are attached after the run.',
   codeDescription: 'The program: the body of an async Python function.',
 }

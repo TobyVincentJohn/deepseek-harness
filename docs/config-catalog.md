@@ -1602,6 +1602,8 @@ Source: [`packages/shell/pwsh-sandbox/src/index.ts:40`](../packages/shell/pwsh-s
  * `*`-wildcard predicates over tool names at call time, not references to
  * registry entries — a pattern matching no currently registered tool is valid
  * (`exclude: [mcp_*]` must stay legal in a deployment that loads no MCP tools).
+ * `countByTool` uses the same pattern syntax for argument-independent root
+ * call chains.
  */
 export interface Config {
   /** Consecutive-repeat counts that trigger a reminder (default `[3, 5, 8]`). */
@@ -1610,6 +1612,11 @@ export interface Config {
   include?: string[]
   /** Tool-name patterns transparent to the chain (neither count nor reset). */
   exclude?: string[]
+  /**
+   * Root tool-name patterns counted by tool name regardless of arguments.
+   * Nested calls are transparent to this root-call chain (default `[]`).
+   */
+  countByTool?: string[]
   /**
    * Maximum characters of canonical arguments quoted in the DETAILED reminder
    * (default 500). Large payloads (a `write` body, a long command) would
@@ -1621,7 +1628,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/guard/repeat-tool-reminder/src/index.ts:28`](../packages/guard/repeat-tool-reminder/src/index.ts)
+Source: [`packages/guard/repeat-tool-reminder/src/index.ts:30`](../packages/guard/repeat-tool-reminder/src/index.ts)
 
 <a id="deepseek-aidsh-sandbox-local"></a>
 

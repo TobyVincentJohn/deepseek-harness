@@ -146,6 +146,11 @@ describe('renderToolsSdk', () => {
     expect(text).toContain('rejects with `ToolCallError`')
     expect(text).toContain('MAY overlap under `Promise.all`')
     expect(text).toContain('lossless JSON')
+    expect(text).toContain('`require` and static `import` are unavailable')
+    expect(text).toContain('do not use `process.cwd()`')
+    expect(text).toContain('`bash` requires both `command` and `description`')
+    expect(text).toContain('stream inputs and return a compact aggregate')
+    expect(text).toContain('For a read-only task, do not call mutating tools')
   })
 
   it('names both required call arguments, not just the program', () => {

@@ -24,6 +24,8 @@ export const name = 'repeat-tool-reminder'
  * `*`-wildcard predicates over tool names at call time, not references to
  * registry entries — a pattern matching no currently registered tool is valid
  * (`exclude: [mcp_*]` must stay legal in a deployment that loads no MCP tools).
+ * `countByTool` uses the same pattern syntax for argument-independent root
+ * call chains.
  */
 export interface Config {
   /** Consecutive-repeat counts that trigger a reminder (default `[3, 5, 8]`). */
@@ -32,6 +34,11 @@ export interface Config {
   include?: string[]
   /** Tool-name patterns transparent to the chain (neither count nor reset). */
   exclude?: string[]
+  /**
+   * Root tool-name patterns counted by tool name regardless of arguments.
+   * Nested calls are transparent to this root-call chain (default `[]`).
+   */
+  countByTool?: string[]
   /**
    * Maximum characters of canonical arguments quoted in the DETAILED reminder
    * (default 500). Large payloads (a `write` body, a long command) would
@@ -46,6 +53,7 @@ export const Config: z<Config> = z.object({
   thresholds: z.array(z.number()).default([3, 5, 8]),
   include: z.array(z.string()).default([]),
   exclude: z.array(z.string()).default([]),
+  countByTool: z.array(z.string()).default([]),
   argumentsPreviewChars: z.number().default(500),
 })
 
@@ -66,6 +74,13 @@ const GENTLE_REMINDER =
   + 'not complete, try a different approach or different arguments instead of '
   + 'repeating the call.'
 
+/** First-threshold reminder for a fragmented root-tool sequence whose arguments may differ. */
+function gentleToolReminder(toolName: string, count: number): string {
+  return `You have called ${toolName} ${count} times consecutively. `
+    + 'Before calling it again, consolidate all known remaining deterministic work '
+    + 'into one call, or finish if enough evidence has been gathered.'
+}
+
 /** The detailed later-threshold reminder naming the tool, the run length, and the canonical arguments. */
 function detailedReminder(toolName: string, count: number, canonicalArguments: string): string {
   return 'Repeated tool call detected:\n'
@@ -76,6 +91,16 @@ function detailedReminder(toolName: string, count: number, canonicalArguments: s
     + 'these exact arguments again. Inspect the latest result and choose a '
     + 'different action, different arguments, or finish the task if enough '
     + 'evidence has been gathered.'
+}
+
+/** Later-threshold reminder for a fragmented root-tool sequence whose arguments may differ. */
+function detailedToolReminder(toolName: string, count: number): string {
+  return 'Repeated tool sequence detected:\n'
+    + `- tool: ${toolName}\n`
+    + `- consecutive_calls: ${count}\n`
+    + 'The calls may use different arguments, but the sequence is still fragmented. '
+    + 'Consolidate the remaining deterministic work into one call, choose a different '
+    + 'approach, or finish if enough evidence has been gathered.'
 }
 
 /**
@@ -165,17 +190,24 @@ export function apply(ctx: Context, config: Config): void {
   const thresholdSet = new Set(thresholds)
   const includePatterns = (config.include as string[]).map(wildcardToRegExp)
   const excludePatterns = (config.exclude as string[]).map(wildcardToRegExp)
+  const countByToolPatterns = (config.countByTool as string[]).map(wildcardToRegExp)
   const argumentsPreviewChars = config.argumentsPreviewChars as number
   if (!Number.isInteger(argumentsPreviewChars) || argumentsPreviewChars < 1) {
     throw new Error(`repeat-tool-reminder: invalid argumentsPreviewChars ${argumentsPreviewChars} — must be an integer >= 1`)
   }
 
-  const chains = new WeakMap<Agent, Chain>()
+  const exactChains = new WeakMap<Agent, Chain>()
+  const rootToolChains = new WeakMap<Agent, Chain>()
 
   /** Whether a tool participates in the chain (untracked calls are transparent: they neither count nor reset). */
   function tracked(toolName: string): boolean {
     if (includePatterns.length > 0 && !includePatterns.some(pattern => pattern.test(toolName))) return false
     return !excludePatterns.some(pattern => pattern.test(toolName))
+  }
+
+  /** Whether a root call is counted by name instead of exact arguments. */
+  function countsByTool(toolName: string): boolean {
+    return countByToolPatterns.some(pattern => pattern.test(toolName))
   }
 
   /**
@@ -191,11 +223,26 @@ export function apply(ctx: Context, config: Config): void {
     // to key on; only agent-loop calls participate.
     if (!exec.agent) return undefined
     if (!tracked(exec.name)) return undefined
+    if (exec.parent === undefined && countsByTool(exec.name)) {
+      exactChains.delete(exec.agent)
+      const chain = rootToolChains.get(exec.agent)
+      const count = chain !== undefined && chain.key === exec.name ? chain.count + 1 : 1
+      rootToolChains.set(exec.agent, { key: exec.name, count })
+      if (!thresholdSet.has(count)) return undefined
+      const text = count === thresholds[0]
+        ? gentleToolReminder(exec.name, count)
+        : detailedToolReminder(exec.name, count)
+      return createUserMessage({
+        content: [{ type: 'text', text }],
+        source: { ...PLUGIN_SOURCE, form: 'notice', summary: `${exec.name} × ${count}` },
+      })
+    }
+    if (exec.parent === undefined) rootToolChains.delete(exec.agent)
     const canonical = canonicalize(exec.arguments)
     const key = JSON.stringify([exec.name, canonical])
-    const chain = chains.get(exec.agent)
+    const chain = exactChains.get(exec.agent)
     const count = chain !== undefined && chain.key === key ? chain.count + 1 : 1
-    chains.set(exec.agent, { key, count })
+    exactChains.set(exec.agent, { key, count })
     if (!thresholdSet.has(count)) return undefined
     const text = count === thresholds[0]
       ? GENTLE_REMINDER
@@ -227,7 +274,10 @@ export function apply(ctx: Context, config: Config): void {
   // loop. Pure reset hook: always delegates (attaching nothing, vetoing
   // nothing).
   ctx.on('agent/pre-step', ({ agent, messages }, next): Promise<PreStepDecision> => {
-    if (messages.some(message => message.source.kind === 'user')) chains.delete(agent)
+    if (messages.some(message => message.source.kind === 'user')) {
+      exactChains.delete(agent)
+      rootToolChains.delete(agent)
+    }
     return next()
   })
 }

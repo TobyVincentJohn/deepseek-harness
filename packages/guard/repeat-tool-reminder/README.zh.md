@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-这是一个仅提供建议的循环中断器，而非面向模型的工具：它不会出现在工具列表中，不会否决或改写调用，只增加一种行为。它监视每个 agent（智能体）的工具调用流，统计以完全相同的规范化参数连续调用同一工具的次数；达到所配置的连续次数时，它会注入逐级增强的提示，要求模型停止重复、重新阅读上一次结果，并改用其他方案或结束任务。究竟是换一种方式重试、收集更多证据还是完成任务，仍完全由模型决定：合理的重复调用既不会延迟，也不会受阻。决策记录见 [repeat-tool-reminder Agent Note](../../../.agents/notes/archived/feature/2026-07-08-repeat-tool-guard.md)。
+这是一个仅提供建议的循环中断器，而非面向模型的工具：它不会出现在工具列表中，不会否决或改写调用，而是监视每个 agent（智能体）的工具调用，识别重复的精确调用或已配置的碎片化根工具序列。达到所配置的连续次数时，它会注入逐级增强的提醒，要求模型改用其他方案、合并工作或结束任务。决定权仍完全属于模型：合理的重复调用既不会延迟，也不会受阻。原始精确匹配设计记录在 [repeat-tool-reminder Agent Note](../../../.agents/notes/archived/feature/2026-07-08-repeat-tool-guard.md) 中；忽略参数的根工具计数记录在 [Code Mode 操作指南 Agent Note](../../../.agents/notes/implemented/bug-fix/2026-08-22-code-mode-operational-guidance.zh.md) 中。
 
 ## 配置
 
@@ -13,16 +13,19 @@
     thresholds: [3, 5, 8]        # default; consecutive counts that trigger a reminder
     include: []                  # tool-name patterns to track; empty ⇒ all tools
     exclude: [todo_write]        # tool-name patterns transparent to the chain
+    countByTool: [run_code]      # root tools counted by name regardless of arguments
     argumentsPreviewChars: 500   # default; cap on arguments quoted in the detailed reminder
 ```
 
 插件加载时，`thresholds` 会对错误配置快速失败：空列表、非整数、小于 2 的值或重复值都会抛出错误，绝不静默回退到默认值；`argumentsPreviewChars` 同样只接受大于等于 1 的整数。系统会将列表按升序规范化；第一个阈值只发送简短的通用提醒，后续每个阈值都会发送详细版本，列出工具、连续次数和规范参数。参数内容截取前 `argumentsPreviewChars` 个字符，并附带省略字符数标记，避免循环中的 `write`／`edit` 载荷无限制进入下一次请求（链键始终比较完整的规范字符串；此上限只约束提醒，不影响检测）。
 
-`include`／`exclude` 条目支持 `*` 通配符，并针对调用时实际存在的工具执行谓词判断，而不是引用注册表条目。因此，与当前任何已注册工具都不匹配的模式并非错误（未加载 MCP 工具的部署中，`exclude: [mcp_*]` 仍然有效）；这与 `toolOrder` 的引用目标检查不同。
+`include`、`exclude` 与 `countByTool` 条目支持 `*` 通配符，并针对调用时实际存在的工具执行谓词判断，而不是引用注册表条目。因此，与当前任何已注册工具都不匹配的模式并非错误（未加载 MCP 工具的部署中，`exclude: [mcp_*]` 仍然有效）；这与 `toolOrder` 的引用目标检查不同。`countByTool` 默认为 `[]`；基础 bundle 将其设为 `[run_code]`。
 
 ## 链语义
 
 链键为「`(tool name, canonical arguments)`」：规范化过程会对键进行深度排序，然后执行 `JSON.stringify`，因此仅属性顺序不同的参数对象会视为相同。若某次调用与上一条受跟踪调用相同，该 agent 的连续计数器递增；换成另一条受跟踪调用则重置为 1。
+
+匹配 `countByTool` 的根调用改用工具名作为键。其嵌套调用对根链透明，因此 `run_code` 内部的 Bash、read 或 grep 调用不会掩盖碎片化的外层程序序列。另一条受跟踪的根调用会重置根链。按工具名计数的提醒不包含参数，并要求模型合并已知的确定性工作。
 
 - **不受跟踪的调用对链透明。** 被 `include`／`exclude` 排除的调用既不递增计数器，也不重置计数器；因此，`grep X → todo_write → grep X` 仍算作连续两次 `grep X`，即使 `todo_write` 已被排除。这正是排除机制的价值：循环中穿插的记录类工具不能掩盖循环。
 - **被拒绝的调用也计数。** 检测位于 `tools/post-execute`；即便调用被 `tools/pre-execute` 监听器拒绝，该事件也会运行。模型反复尝试被拒绝的调用，恰恰是需要打断的循环。
@@ -56,6 +59,26 @@ You are repeating the exact same tool call with identical arguments. Carefully a
 
 仅追加；新出现的内容位于可复用请求前缀之后，不会使现有 KV Cache 条目失效。
 
+### 首个阈值的按工具名计数上下文消息
+
+#### 模型看到的内容
+
+达到第一个配置阈值时，`countByTool` 链会收到以下忽略参数的提醒。
+
+##### 首个阈值的按工具名计数提醒
+
+```markdown
+You have called <toolName> <count> times consecutively. Before calling it again, consolidate all known remaining deterministic work into one call, or finish if enough evidence has been gathered.
+```
+
+#### Token 影响
+
+达到阈值前为零 token。提醒会作为该 agent 的历史记录保留。
+
+#### KV Cache 影响
+
+仅追加；新出现的内容位于可复用请求前缀之后，不会使现有 KV Cache 条目失效。
+
 ### 后续阈值的上下文消息
 
 #### 模型看到的内容
@@ -74,7 +97,30 @@ The repeated calls are not making progress. Do not call this tool with these exa
 
 #### Token 影响
 
-每条提醒都会作为历史记录保留；`argumentsPreviewChars` 会限制随数据变化的参数文本长度，而各 agent 仍使用独立计数器。
+每条提醒都会作为历史记录保留；`argumentsPreviewChars` 会限制精确匹配提醒中的参数文本，且各 agent 仍使用独立计数器。
+
+#### KV Cache 影响
+
+仅追加；新出现的内容位于可复用请求前缀之后，不会使现有 KV Cache 条目失效。
+
+### 后续阈值的按工具名计数上下文消息
+
+#### 模型看到的内容
+
+达到后续 `countByTool` 阈值时，agent 会收到以下忽略参数的提醒模板。
+
+##### 后续阈值的按工具名计数提醒
+
+```markdown
+Repeated tool sequence detected:
+- tool: <toolName>
+- consecutive_calls: <count>
+The calls may use different arguments, but the sequence is still fragmented. Consolidate the remaining deterministic work into one call, choose a different approach, or finish if enough evidence has been gathered.
+```
+
+#### Token 影响
+
+每条提醒都会作为历史记录保留且不携带参数文本；各 agent 仍使用独立计数器。
 
 #### KV Cache 影响
 
@@ -82,7 +128,7 @@ The repeated calls are not making progress. Do not call this tool with these exa
 
 ## 已知限制与暂缓事项
 
-- **仅检测精确匹配**：规范化过程会对键进行深度排序，因此近似变体（稍作修改的路径、值内增加的空白）可以绕过链；在没有需求证据前，不采用模糊匹配。
+- **精确匹配仍是默认行为**：规范化过程会对键进行深度排序，因此近似变体可以绕过普通链。`countByTool` 仅有意扩展已配置的根工具；在没有需求证据前，不采用模糊匹配。
 - **压缩（compaction）不会重置链**：跨越压缩检查点的链会继续计数。
 - **仅提供建议**：尚未实现达到较高阈值后升级为 `block`，但 `PostToolDecision` 已支持阻止调用。
 - **subagent 之间不共享链**：链始终按 agent 隔离；即使父 agent 与其 subagent 重复相同调用，也不会合并计数。

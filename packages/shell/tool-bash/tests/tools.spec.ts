@@ -373,6 +373,10 @@ describe('bash tool', () => {
     expect(Object.keys(bashSchema.parameters.properties as Record<string, unknown>))
       .toContain('run_in_background')
     expect(bashSchema.description).toContain('job_output')
+    expect(bashSchema.description).toContain('one multiline script or pipeline')
+    expect(bashSchema.description).toContain('do not create or modify files')
+    const command = (bashSchema.parameters.properties as Record<string, { description?: string }>).command
+    expect(command?.description).toContain('deterministic bulk work')
   })
 
   it('contributes the exit-code habit as its prompt section (guidance the descriptions cannot carry)', async () => {

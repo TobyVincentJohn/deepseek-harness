@@ -155,10 +155,12 @@
   config:
     allowParallelInProgress: true
 
-# Identical repeat calls trigger advisory context, never a block, at the default
-# thresholds [3, 5, 8]. Only the repeat-tool-reminder snapshot scenario reaches them.
+# The snapshot counts todo_write root calls by name so it pins the configured
+# argument-independent reminder path at the default thresholds [3, 5, 8].
 - id: repeat-tool-reminder
   name: '@deepseek-ai/dsh-repeat-tool-reminder'
+  config:
+    countByTool: [todo_write]
 
 # The filesystem stack rides the SAME sandbox policy as bash: dsh-fs-sandbox
 # replaces dsh-fs-local behind ctx.fs and fences write/edit by the effective

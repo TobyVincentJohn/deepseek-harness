@@ -95,6 +95,63 @@ describe('threshold escalation', () => {
 })
 
 describe('chain semantics', () => {
+  it('counts configured root tools by name while nested calls and changing arguments stay transparent', async () => {
+    const ctx = await harness({ countByTool: ['composite'] })
+    ctx.tools.register(defineContentToolFixture({
+      name: 'composite',
+      description: 'Run one nested tool call.',
+      parameters: {},
+      async execute(_args, exec) {
+        await ctx.tools.execute({
+          callId: CallId(`nested-${String(exec.callId)}`),
+          rootCallId: exec.rootCallId,
+          name: 'other',
+          arguments: { root: String(exec.callId) },
+          ...exec.agent ? { agent: exec.agent } : {},
+          parent: exec.token,
+          signal: exec.signal,
+        })
+        return [{ type: 'text', text: 'composite ok' }]
+      },
+    }))
+    const adapter = new MockAdapter([
+      ...Array.from({ length: 5 }, (_, i) => toolCallResponse(`c${i}`, 'composite', { pass: i })),
+      textResponse('done'),
+    ])
+    ctx.llm.registerAdapter(['mock'], adapter)
+    const agent = ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await waitForIdle(ctx, agent)
+
+    const found = reminders(agent)
+    expect(found).toHaveLength(2)
+    expect(found[0]!.text).toContain('called composite 3 times consecutively')
+    expect(found[0]!.text).toContain('consolidate all known remaining deterministic work')
+    expect(found[0]!.source).toEqual(guardSource('composite', 3))
+    expect(found[1]!.text).toContain('Repeated tool sequence detected')
+    expect(found[1]!.text).toContain('consecutive_calls: 5')
+    expect(found[1]!.text).not.toContain('- arguments:')
+    expect(found[1]!.source).toEqual(guardSource('composite', 5))
+  })
+
+  it('resets a name-counted root chain when a different tracked root tool intervenes', async () => {
+    const ctx = await harness({ countByTool: ['probe'] })
+    const adapter = new MockAdapter([
+      toolCallResponse('c1', 'probe', { q: 1 }),
+      toolCallResponse('c2', 'probe', { q: 2 }),
+      toolCallResponse('c3', 'other', {}),
+      toolCallResponse('c4', 'probe', { q: 3 }),
+      toolCallResponse('c5', 'probe', { q: 4 }),
+      textResponse('done'),
+    ])
+    ctx.llm.registerAdapter(['mock'], adapter)
+    const agent = ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await waitForIdle(ctx, agent)
+
+    expect(reminders(agent)).toHaveLength(0)
+  })
+
   it('caps the detailed reminder arguments at argumentsPreviewChars (detection still keys on the full string)', async () => {
     const ctx = await harness({ thresholds: [2, 3], argumentsPreviewChars: 24 })
     const bigPayload = 'x'.repeat(400)

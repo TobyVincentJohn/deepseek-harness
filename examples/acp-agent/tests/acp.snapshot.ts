@@ -422,9 +422,9 @@ const SCENARIOS: Scenario[] = [
   // proves the session continues past the truncated step.
   { name: 'max-tokens-continue', hasModelTurn: true, recorded: false },
   // Keyless, authored (like error-finish/cancel): deterministically forcing a
-  // LIVE model to repeat one call three times is not a stable recording, so
-  // the fixture scripts five identical todo_write calls and pins BOTH reminder
-  // tiers (gentle at 3, detailed at 5) as injected user/message in transcript and log.
+  // LIVE model to repeat one root tool three times is not a stable recording,
+  // so the fixture scripts five todo_write calls under countByTool and pins
+  // BOTH argument-independent reminder tiers as injected user/message in transcript and log.
   { name: 'repeat-tool-reminder', hasModelTurn: true, recorded: false },
   // Authored replay: a root AGENTS.md pins the session prefix, then a read in
   // nested/ discovers its narrower AGENTS.md as a raw, metadata-bearing

@@ -122,7 +122,7 @@ ask_user_question pauses the tool call until the active UI provider returns a hu
 
 ### `run_code`
 
-Execute a TypeScript program against the available tools. Takes two required arguments: `code`, the BODY of an async function (erasable syntax only; top-level `await` and `return` work), and `description`, a short summary of what the program does. Call tools as `await tools.name(args)` per the declarations in the system prompt. Batch deterministic work into one program; each run starts with fresh in-memory state. Only what you print or return is program output — curate it. Image-bearing subtool results are attached after the run.
+Execute a TypeScript program against the available tools. Takes two required arguments: `code`, the BODY of an async function (erasable syntax only; top-level `await` and `return` work), and `description`, a short summary of what the program does. Call tools as `await tools.name(args)` per the declarations in the system prompt. Batch deterministic work into one program; each run starts with fresh in-memory state. Use declared tool bindings for task I/O; do not use Node module or `process` APIs. Honor read-only requests inside nested tools. Only what you print or return is program output — curate it. Image-bearing subtool results are attached after the run.
 
 ```json
 {
@@ -130,7 +130,7 @@ Execute a TypeScript program against the available tools. Takes two required arg
   "properties": {
     "code": {
       "type": "string",
-      "description": "The program: the body of an async TypeScript function."
+      "description": "The program: the body of an async TypeScript function. Use declared tool bindings for task I/O; `require` and static `import` are unavailable."
     },
     "description": {
       "type": "string",
@@ -181,7 +181,7 @@ exit_plan_mode stays in the model-facing schema while planning is inactive so tr
 
 ### `bash`
 
-Execute a bash command (`bash -c`) and return its stdout/stderr. Each call runs in a fresh shell: no state (cwd, variables, functions) persists between calls — pass `workdir` instead of using `cd`. Non-zero exits are reported as `[exit code: N]`. Current harness environment facts are exposed through managed `$DSH_*` variables; inspect them when needed. Commands may run under a file sandbox; a blocked file operation is reported as `[sandbox: file access denied under <mode> mode]` — a policy denial, not a bug in the command; do not retry another way. Long output is truncated to its tail; the full output is saved to a file whose path is reported when available. Set `run_in_background: true` for long-running commands: the call returns a job id immediately; read its output with `job_output` and stop it with `job_kill`.
+Execute a bash command (`bash -c`) and return its stdout/stderr. Each call runs in a fresh shell: no state (cwd, variables, functions) persists between calls — pass `workdir` instead of using `cd`. Non-zero exits are reported as `[exit code: N]`. For deterministic bulk analysis, prefer one multiline script or pipeline that streams inputs and emits a compact aggregate. When the user requests read-only work, do not create or modify files; use inline scripts and standard streams. Current harness environment facts are exposed through managed `$DSH_*` variables; inspect them when needed. Commands may run under a file sandbox; a blocked file operation is reported as `[sandbox: file access denied under <mode> mode]` — a policy denial, not a bug in the command; do not retry another way. Long output is truncated to its tail; the full output is saved to a file whose path is reported when available. Set `run_in_background: true` for long-running commands: the call returns a job id immediately; read its output with `job_output` and stop it with `job_kill`.
 
 ```json
 {
@@ -189,7 +189,7 @@ Execute a bash command (`bash -c`) and return its stdout/stderr. Each call runs 
   "properties": {
     "command": {
       "type": "string",
-      "description": "The bash command to execute."
+      "description": "The bash command to execute. Prefer one multiline script or pipeline for deterministic bulk work instead of several small calls."
     },
     "description": {
       "type": "string",

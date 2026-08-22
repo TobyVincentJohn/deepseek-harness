@@ -13,7 +13,7 @@ import { buildWindow, formatReadOutput, langFromPath, readMetaFromMeta } from '.
 import { resolveRegularReadTarget } from './read-target.ts'
 
 /** Default and maximum number of lines returned by one `read` call (the `readLimit` config). */
-export const READ_LIMIT = 2000
+export const READ_LIMIT = 200
 
 /**
  * Default streaming threshold (the `readStreamMinSize` config): files at or
@@ -70,16 +70,16 @@ export function applyReadTool(ctx: Context, caps: ReadToolCaps): void {
   ctx.systemPrompt.section({
     name: 'tool:read',
     order: 100,
-    text: 'Use the read tool — not shell commands like cat — to inspect text files. Results include line numbers. Use offset and limit to continue reading large files.',
+    text: 'Use the read tool — not shell commands like cat — for targeted text-file windows. Search with grep first when you need to locate evidence, then read only the relevant surrounding lines. Do not page through logs, JSONL, snapshots, generated data, or many similar files to compute aggregates; use a streaming script and return a bounded summary instead.',
   })
 
   ctx.tools.register(defineTool({
     name: 'read',
-    description: 'Read a UTF-8 text file and return line-numbered content.',
+    description: 'Read a targeted window of a UTF-8 text file and return line-numbered content. Search first when the location is unknown; do not use repeated reads for bulk-data aggregation.',
     parameters: {
       file_path: { type: 'string', required: true, description: 'Path to read, resolved by the filesystem backend.' },
       offset: { type: 'number', description: '1-based first line to return. Defaults to 1.' },
-      limit: { type: 'number', description: `Maximum number of lines to return. Defaults to ${caps.limit}.` },
+      limit: { type: 'number', description: `Maximum number of lines to return. Defaults to and cannot exceed ${caps.limit}; keep the window as small as the task permits.` },
     },
     output: {
       schema: {

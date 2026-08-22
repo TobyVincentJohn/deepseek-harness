@@ -40,7 +40,7 @@ Node deployments receive the `@vscode/ripgrep` platform package on supported mac
 | `glob` | `pattern`, `path?` | `rg --files --glob <pattern> --sort=modified --no-ignore --hidden` plus VCS metadata excludes (`.git`, `.svn`, `.hg`, `.bzr`, `.jj`, `.sl`). `path` is an optional **directory** search root; omitted means the resolved workdir. Returns one FILE path per line; `rg --files` never emits directory entries. The pattern keeps ripgrep semantics: without a `/` it matches the basename at any depth, so `*` matches the whole tree. Complete results stay modification-time ordered; over-cap presentation follows `sampleOverCapGlobResults`. |
 | `grep` | `pattern`, `path?`, `include?` | Line-oriented `rg --json` parse (no colon-splitting ambiguity). `pattern` is a ripgrep regex; `path` is an optional **file or directory** target; `include` is ONE positive glob filter — a comma-separated list or a negated (`!…`) value is rejected up front (brace alternation like `*.{ts,tsx}` is fine). Returns matches grouped by file as `Line N: <preview>`. |
 
-Routine budgets stay out of the model-facing schema (no `head_limit`/`offset`/`case_insensitive`/output modes): a model that needs surrounding context reads the matched file with `read`; one that needs later results follows the returned spill locator's retrieval hint.
+Routine budgets stay out of the model-facing schema (no `head_limit`/`offset`/`case_insensitive`/output modes): model guidance directs file discovery through `glob`, evidence location through `grep`, and only matched surrounding context through `read`. Whole-dataset parsing and aggregation belongs in a streaming Bash pipeline. A model that needs later search results follows the returned spill locator's retrieval hint.
 
 ## Two budgets, two artifacts
 
@@ -61,19 +61,19 @@ Every request in this plugin's registration scope contains the independently reg
 ##### Glob guidance with `sampleOverCapGlobResults: true`
 
 ```markdown
-Use the glob tool — not shell find — to discover files by path pattern. A pattern with no "/" matches basenames at any depth, so "*" matches every file in the tree rather than its top level. Results are files only, never directories, and include hidden and ignored files: a result that fits comes back in modification-time order, while a larger one is sampled across top-level entries, so it spans the tree instead of one subtree.
+Use the glob tool — not shell find or recursive ls — to locate candidate files before searching or reading them. A pattern with no "/" matches basenames at any depth, so "*" matches every file in the tree rather than its top level. Avoid broad listings when a narrower path or pattern can identify the candidates. Results are files only, never directories, and include hidden and ignored files: a result that fits comes back in modification-time order, while a larger one is sampled across top-level entries, so it spans the tree instead of one subtree.
 ```
 
 ##### Glob guidance with `sampleOverCapGlobResults: false`
 
 ```markdown
-Use the glob tool — not shell find — to discover files by path pattern. A pattern with no "/" matches basenames at any depth, so "*" matches every file in the tree rather than its top level. Results are files only, never directories, and include hidden and ignored files: a result that fits comes back in modification-time order, while a larger one keeps the modification-time-ordered head.
+Use the glob tool — not shell find or recursive ls — to locate candidate files before searching or reading them. A pattern with no "/" matches basenames at any depth, so "*" matches every file in the tree rather than its top level. Avoid broad listings when a narrower path or pattern can identify the candidates. Results are files only, never directories, and include hidden and ignored files: a result that fits comes back in modification-time order, while a larger one keeps the modification-time-ordered head.
 ```
 
 ##### Grep guidance
 
 ```markdown
-Use the grep tool — not shell grep or rg — to search file contents. Use read on a matched file when you need surrounding context.
+Search with the grep tool — not shell grep or rg — before reading files when you need to locate symbols, fields, errors, or other evidence. Narrow broad searches with path and include, then read only the relevant surrounding windows. Grep finds evidence; use a streaming Bash pipeline instead when every record must be parsed or aggregated.
 ```
 
 #### Token effect

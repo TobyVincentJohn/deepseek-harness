@@ -240,11 +240,16 @@ describe('registration', () => {
     expect(ctx.tools.schemas().map(s => s.name).sort()).toEqual(['glob', 'grep'])
     const prompt = renderPrompt(await ctx.systemPrompt.assemble())
     expect(prompt).toContain('Use the glob tool')
-    expect(prompt).toContain('Use the grep tool')
+    expect(prompt).toContain('Search with the grep tool')
+    expect(prompt).toContain('before reading files')
+    expect(prompt).toContain('streaming Bash pipeline')
     expect(prompt).toContain('sampled across top-level entries')
     expect(prompt).not.toContain('sampled across top-level directories')
     const glob = ctx.tools.schemas().find(schema => schema.name === 'glob')
     expect(glob?.description).toContain('sampled across top-level entries')
+    expect(glob?.description).toContain('before searching or reading')
+    const grep = ctx.tools.schemas().find(schema => schema.name === 'grep')
+    expect(grep?.description).toContain('before reading whole files')
   })
 
   it('stays pending until ctx.subprocess exists (inject)', async () => {

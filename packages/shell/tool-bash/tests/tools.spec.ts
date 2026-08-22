@@ -328,7 +328,6 @@ describe('bash tool', () => {
   it.each([
     [{}, /missing required property "command"/],
     [{ command: 42, description: 'd' }, /"command" must be a string/],
-    [{ command: 'x' }, /missing required property "description"/],
     [{ command: 'x', description: 7 }, /"description" must be a string/],
     [{ command: 'x', description: 'd', timeoutMs: 'soon' }, /"timeoutMs" must be a number/],
     [{ command: 'x', description: 'd', workdir: 7 }, /"workdir" must be a string/],
@@ -338,6 +337,13 @@ describe('bash tool', () => {
     const result = await call(ctx, 'bash', args)
     expect(result.isError).toBe(true)
     expect(text(result)).toMatch(pattern)
+  })
+
+  it('accepts an omitted display description', async () => {
+    const ctx = await setup()
+    const result = await call(ctx, 'bash', { command: 'printf ok' })
+    expect(result.isError).toBe(false)
+    expect(text(result)).toBe('ok')
   })
 
   // Value constraints the ParameterSchemaSpec can't express stay in the tool body.
@@ -368,15 +374,20 @@ describe('bash tool', () => {
     const bashSchema = schemas[0]!
     expect(bashSchema.parameters).toMatchObject({
       type: 'object',
-      required: ['command', 'description'],
+      required: ['command'],
     })
     expect(Object.keys(bashSchema.parameters.properties as Record<string, unknown>))
       .toContain('run_in_background')
     expect(bashSchema.description).toContain('job_output')
-    expect(bashSchema.description).toContain('one multiline script or pipeline')
+    expect(bashSchema.description).toContain('Use dedicated glob and grep tools')
+    expect(bashSchema.description).toContain('one multiline streaming pipeline')
+    expect(bashSchema.description).toContain('do not print raw records')
     expect(bashSchema.description).toContain('do not create or modify files')
     const command = (bashSchema.parameters.properties as Record<string, { description?: string }>).command
-    expect(command?.description).toContain('deterministic bulk work')
+    expect(command?.description).toContain('performs discovery, parsing, aggregation, and top-N selection together')
+    const description = (bashSchema.parameters.properties as Record<string, { description?: string }>).description
+    expect(description?.description).toContain('Optional clear, concise description')
+    expect(description?.description).toContain('Run shell command')
   })
 
   it('contributes the exit-code habit as its prompt section (guidance the descriptions cannot carry)', async () => {
@@ -393,6 +404,12 @@ describe('bash tool', () => {
       'test:after-bash',
     ])
     expect(section?.text).toContain('[exit code: N]')
+    expect(section?.text).toContain("foreground result's exitCode")
+    expect(section?.text).toContain('stdout.text / stderr.text')
+    expect(section?.text).toContain('use a quoted heredoc for multiline scripts')
+    expect(section?.text).toContain('repair only its smallest cause')
+    expect(section?.text).toContain('Use glob and grep for ordinary discovery')
+    expect(section?.text).toContain('bound stdout to the final aggregate')
   })
 
   it('unregisters everything when the plugin fiber is disposed (HMR safety)', async () => {
@@ -924,6 +941,8 @@ describe('tool-owned UI presentation (presentCall / presentResult)', () => {
     // the session cwd, matching where execution runs) — not dropped.
     expect(ctx.tools.get('bash')?.presentCall?.({ command: 'pwd', description: 'Print dir', workdir: 'sub' }))
       .toEqual({ card: 'terminal', title: 'pwd', description: 'Print dir', cwd: 'sub' })
+    expect(ctx.tools.get('bash')?.presentCall?.({ command: 'pwd' }))
+      .toEqual({ card: 'terminal', title: 'pwd', description: 'Run shell command' })
   })
 
   it('bash presentResult: a terminal result carries RAW output (newlines intact) + parsed exit code', async () => {
@@ -1007,6 +1026,8 @@ describe('tool-owned UI presentation (presentCall / presentResult)', () => {
     // execute card with the command as rawInput and the description as content.
     const call = ctx.tools.get('bash')!.presentCall!({ command: 'sleep 100', description: 'wait', run_in_background: true })
     expect(call).toEqual({ card: 'generic', title: 'sleep 100', kind: 'execute', rawInput: 'sleep 100', content: [{ type: 'text', text: 'wait' }] })
+    expect(ctx.tools.get('bash')!.presentCall!({ command: 'sleep 100', run_in_background: true }))
+      .toEqual({ card: 'generic', title: 'sleep 100', kind: 'execute', rawInput: 'sleep 100', content: [{ type: 'text', text: 'Run shell command' }] })
     // The ack result is a generic fenced-text card — no terminal output / exit pill.
     const result = ctx.tools.get('bash')!.presentResult!(
       { command: 'sleep 100', description: 'wait', run_in_background: true },
@@ -1046,11 +1067,11 @@ describe('tool-owned UI presentation (presentCall / presentResult)', () => {
     })).toBeUndefined()
   })
 
-  it('presentCall validates softly: malformed args (missing required description) return undefined, never throw', async () => {
+  it('presentCall validates softly: malformed optional descriptions return undefined, never throw', async () => {
     const ctx = await setup()
     // `defineTool` soft-validates replayed logged args before presentation. Invalid shapes return
     // undefined for generic UI rendering rather than throwing; `presentCall` accepts `unknown`.
-    expect(ctx.tools.get('bash')?.presentCall?.({ command: 'ls' })).toBeUndefined()
+    expect(ctx.tools.get('bash')?.presentCall?.({ command: 'ls', description: 42 })).toBeUndefined()
   })
 })
 

@@ -51,7 +51,10 @@ const TYPESCRIPT_FLAVOR: RunCodeFlavor = {
     + 'does. Call tools as `await tools.name(args)` per the declarations in the system '
     + 'prompt. Batch deterministic work into one program; each run starts with fresh '
     + 'in-memory state. Use declared tool bindings for task I/O; do not use Node module or '
-    + '`process` APIs. Honor read-only requests inside nested tools. Only what you print or '
+    + '`process` APIs. Search before reading, keep reads narrow, and use one streaming Bash '
+    + 'pipeline for bulk data when those tools are declared. Use exact declared return shapes, '
+    + 'check command exit codes, and repair the smallest cause once when a run fails. Honor read-only requests inside '
+    + 'nested tools. Only what you print or '
     + 'return is program output — curate it. Image-bearing '
     + 'subtool results are attached after the run.',
   codeDescription:
@@ -71,7 +74,10 @@ const PYTHON_FLAVOR: RunCodeFlavor = {
     + 'work), and `description`, a short summary of what the program does. Call tools as '
     + '`await tools.name(args)` per the declarations in the system prompt. Batch '
     + 'deterministic work into one program; each run starts with fresh in-memory state. Use '
-    + 'declared tool bindings for task I/O and honor read-only requests inside nested tools. '
+    + 'declared tool bindings for task I/O. Search before reading, keep reads narrow, and use '
+    + 'one streaming Bash pipeline for bulk data when those tools are declared. Use exact '
+    + 'declared return shapes, check command exit codes, and repair the smallest cause once when a run fails. Honor '
+    + 'read-only requests inside nested tools. '
     + 'Use `print(...)` and/or `return <value>` for program output — curate it. Image-bearing '
     + 'subtool results are attached after the run.',
   codeDescription: 'The program: the body of an async Python function.',

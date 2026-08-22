@@ -122,7 +122,7 @@ ask_user_question pauses the tool call until the active UI provider returns a hu
 
 ### `run_code`
 
-Execute a TypeScript program against the available tools. Takes two required arguments: `code`, the BODY of an async function (erasable syntax only; top-level `await` and `return` work), and `description`, a short summary of what the program does. Call tools as `await tools.name(args)` per the declarations in the system prompt. Batch deterministic work into one program; each run starts with fresh in-memory state. Use declared tool bindings for task I/O; do not use Node module or `process` APIs. Honor read-only requests inside nested tools. Only what you print or return is program output — curate it. Image-bearing subtool results are attached after the run.
+Execute a TypeScript program against the available tools. Takes two required arguments: `code`, the BODY of an async function (erasable syntax only; top-level `await` and `return` work), and `description`, a short summary of what the program does. Call tools as `await tools.name(args)` per the declarations in the system prompt. Batch deterministic work into one program; each run starts with fresh in-memory state. Use declared tool bindings for task I/O; do not use Node module or `process` APIs. Search before reading, keep reads narrow, and use one streaming Bash pipeline for bulk data when those tools are declared. Use exact declared return shapes, check command exit codes, and repair the smallest cause once when a run fails. Honor read-only requests inside nested tools. Only what you print or return is program output — curate it. Image-bearing subtool results are attached after the run.
 
 ```json
 {
@@ -181,7 +181,7 @@ exit_plan_mode stays in the model-facing schema while planning is inactive so tr
 
 ### `bash`
 
-Execute a bash command (`bash -c`) and return its stdout/stderr. Each call runs in a fresh shell: no state (cwd, variables, functions) persists between calls — pass `workdir` instead of using `cd`. Non-zero exits are reported as `[exit code: N]`. For deterministic bulk analysis, prefer one multiline script or pipeline that streams inputs and emits a compact aggregate. When the user requests read-only work, do not create or modify files; use inline scripts and standard streams. Current harness environment facts are exposed through managed `$DSH_*` variables; inspect them when needed. Commands may run under a file sandbox; a blocked file operation is reported as `[sandbox: file access denied under <mode> mode]` — a policy denial, not a bug in the command; do not retry another way. Long output is truncated to its tail; the full output is saved to a file whose path is reported when available. Set `run_in_background: true` for long-running commands: the call returns a job id immediately; read its output with `job_output` and stop it with `job_kill`.
+Execute a bash command (`bash -c`) and return its stdout/stderr. Each call runs in a fresh shell: no state (cwd, variables, functions) persists between calls — pass `workdir` instead of using `cd`. Non-zero exits are reported as `[exit code: N]`. Use dedicated glob and grep tools for ordinary file and text discovery when available. For bulk logs, archives, or datasets, use one multiline streaming pipeline that computes the complete aggregate and emits only bounded counts, maxima, timings, or top-N rows with source identifiers; do not print raw records or split discovery into repeated ls/du/wc calls. The command is Bash source: invoke other interpreters explicitly and use a quoted heredoc for multiline scripts. In Code Mode, consume the exact foreground result shape (`kind`, `exitCode`, `stdout.text`, and `stderr.text`); a resolved call with a non-zero exit still failed. When the user requests read-only work, do not create or modify files; use inline scripts and standard streams. Current harness environment facts are exposed through managed `$DSH_*` variables; inspect them when needed. Commands may run under a file sandbox; a blocked file operation is reported as `[sandbox: file access denied under <mode> mode]` — a policy denial, not a bug in the command; do not retry another way. Long output is truncated to its tail; the full output is saved to a file whose path is reported when available. Set `run_in_background: true` for long-running commands: the call returns a job id immediately; read its output with `job_output` and stop it with `job_kill`.
 
 ```json
 {
@@ -189,11 +189,11 @@ Execute a bash command (`bash -c`) and return its stdout/stderr. Each call runs 
   "properties": {
     "command": {
       "type": "string",
-      "description": "The bash command to execute. Prefer one multiline script or pipeline for deterministic bulk work instead of several small calls."
+      "description": "The bash command to execute. For deterministic bulk work, use one multiline streaming script or pipeline that performs discovery, parsing, aggregation, and top-N selection together; keep stdout bounded to the final summary."
     },
     "description": {
       "type": "string",
-      "description": "Clear, concise description of what this command does in active voice, 5-10 words (shown in the UI). Examples: \"ls\" → \"List files in current directory\"; \"git status\" → \"Show working tree status\"; \"npm install\" → \"Install package dependencies\"."
+      "description": "Optional clear, concise description of what this command does in active voice, 5-10 words (shown in the UI). Examples: \"ls\" → \"List files in current directory\"; \"git status\" → \"Show working tree status\"; \"npm install\" → \"Install package dependencies\". When omitted, the UI uses \"Run shell command\"."
     },
     "timeoutMs": {
       "type": "number",
@@ -209,8 +209,7 @@ Execute a bash command (`bash -c`) and return its stdout/stderr. Each call runs 
     }
   },
   "required": [
-    "command",
-    "description"
+    "command"
   ]
 }
 ```
@@ -666,7 +665,7 @@ Source: [`packages/fs/tool-fs/src/index.ts`](../packages/fs/tool-fs/src/index.ts
 
 ### `read`
 
-Read a UTF-8 text file and return line-numbered content.
+Read a targeted window of a UTF-8 text file and return line-numbered content. Search first when the location is unknown; do not use repeated reads for bulk-data aggregation.
 
 ```json
 {
@@ -682,7 +681,7 @@ Read a UTF-8 text file and return line-numbered content.
     },
     "limit": {
       "type": "number",
-      "description": "Maximum number of lines to return. Defaults to 2000."
+      "description": "Maximum number of lines to return. Defaults to and cannot exceed 200; keep the window as small as the task permits."
     }
   },
   "required": [
@@ -748,7 +747,7 @@ The read-before-write/edit policy is added by `@deepseek-ai/dsh-fs-observation-p
 
 ### `glob`
 
-Find files whose paths match a glob pattern. Returns matching file paths — never directories — including hidden and ignored files (VCS metadata directories are excluded). Up to 100 paths come back in modification-time order; a larger result instead returns 100 paths sampled across top-level entries, says so, and reports where the complete sorted list was saved. This tool does not enumerate directory entries.
+Locate candidate files whose paths match a glob pattern before searching or reading them. Returns matching file paths — never directories — including hidden and ignored files (VCS metadata directories are excluded). Up to 100 paths come back in modification-time order; a larger result instead returns 100 paths sampled across top-level entries, says so, and reports where the complete sorted list was saved. This tool does not enumerate directory entries.
 
 ```json
 {
@@ -773,7 +772,7 @@ Source: [`packages/fs/tool-fs-search/src/index.ts`](../packages/fs/tool-fs-searc
 
 ### `grep`
 
-Search file contents with a ripgrep regular expression. Returns matching lines with line numbers, grouped by file. Returns the first 250 matches inline; a capped result reports where the complete match list was saved. Use read on a matched file for surrounding context.
+Search file contents with a ripgrep regular expression before reading whole files. Returns matching lines with line numbers, grouped by file. Returns the first 250 matches inline; a capped result reports where the complete match list was saved. Use read on a matched file for surrounding context.
 
 ```json
 {
@@ -781,7 +780,7 @@ Search file contents with a ripgrep regular expression. Returns matching lines w
   "properties": {
     "pattern": {
       "type": "string",
-      "description": "Regular expression to search for (ripgrep syntax)."
+      "description": "Regular expression to search for (ripgrep syntax). Prefer a discriminating field, symbol, error, or event name over a broad wildcard."
     },
     "path": {
       "type": "string",

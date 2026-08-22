@@ -276,16 +276,16 @@ export function applyGrepTool(ctx: Context, caps: GrepToolCaps): void {
   ctx.systemPrompt.section({
     name: 'tool:grep',
     order: 104,
-    text: 'Use the grep tool — not shell grep or rg — to search file contents. Use read on a matched file when you need surrounding context.',
+    text: 'Search with the grep tool — not shell grep or rg — before reading files when you need to locate symbols, fields, errors, or other evidence. Narrow broad searches with path and include, then read only the relevant surrounding windows. Grep finds evidence; use a streaming Bash pipeline instead when every record must be parsed or aggregated.',
   })
 
   const tool = defineTool({
     name: 'grep',
-    description: 'Search file contents with a ripgrep regular expression. Returns matching lines with line numbers, grouped by file. '
+    description: 'Search file contents with a ripgrep regular expression before reading whole files. Returns matching lines with line numbers, grouped by file. '
       + `Returns the first ${caps.maxMatches} matches inline; a capped result reports where the complete match list was saved. `
       + 'Use read on a matched file for surrounding context.',
     parameters: {
-      pattern: { type: 'string', required: true, description: 'Regular expression to search for (ripgrep syntax).' },
+      pattern: { type: 'string', required: true, description: 'Regular expression to search for (ripgrep syntax). Prefer a discriminating field, symbol, error, or event name over a broad wildcard.' },
       path: { type: 'string', description: 'File or directory to search. Defaults to the session workspace; a relative path resolves against it.' },
       include: { type: 'string', description: 'One glob filter for which files to search (e.g. "*.ts", "*.{js,jsx}"). Not a list; negation is not supported.' },
     },

@@ -40,7 +40,7 @@ Node 部署在受支持的 macOS、Linux 与 Windows x64/arm64 目标上获得 `
 | `glob` | `pattern`、`path?` | 运行 `rg --files --glob <pattern> --sort=modified --no-ignore --hidden`，并排除 VCS 元数据（`.git`、`.svn`、`.hg`、`.bzr`、`.jj`、`.sl`）。`path` 是可选的**目录**搜索根；省略时使用解析后的工作目录。每行返回一个**文件**路径；`rg --files` 从不输出目录条目。pattern 保留 ripgrep 语义：不含 `/` 时匹配任意深度的基名，因此 `*` 匹配整棵树。完整结果保持按修改时间排序；超过上限时的呈现方式遵循 `sampleOverCapGlobResults`。 |
 | `grep` | `pattern`、`path?`、`include?` | 按行解析 `rg --json`，避免按冒号拆分的歧义。`pattern` 是 ripgrep 正则表达式；`path` 是可选的**文件或目录**目标；`include` 是一个正向 glob 过滤器，前置拒绝逗号分隔列表或否定值（`!…`），但允许 `*.{ts,tsx}` 等花括号交替。返回按文件分组、形如 `Line N: <preview>` 的匹配。 |
 
-常规预算不进入面向模型的 schema（没有 `head_limit`/`offset`/`case_insensitive`/输出模式）：模型需要周边上下文时，用 `read` 读取匹配文件；需要后续结果时，遵循返回的 spill locator 检索提示。
+常规预算不进入面向模型的 schema（没有 `head_limit`/`offset`/`case_insensitive`/输出模式）：模型指南要求用 `glob` 发现文件、用 `grep` 定位证据，只通过 `read` 获取匹配位置周边的上下文。完整数据集的解析与聚合属于流式 Bash 流水线。模型需要后续搜索结果时，遵循返回的 spill locator 检索提示。
 
 ## 两类预算、两类产物
 
@@ -61,19 +61,19 @@ Node 部署在受支持的 macOS、Linux 与 Windows x64/arm64 目标上获得 `
 ##### 启用 `sampleOverCapGlobResults: true` 时的 Glob 指导
 
 ```markdown
-Use the glob tool — not shell find — to discover files by path pattern. A pattern with no "/" matches basenames at any depth, so "*" matches every file in the tree rather than its top level. Results are files only, never directories, and include hidden and ignored files: a result that fits comes back in modification-time order, while a larger one is sampled across top-level entries, so it spans the tree instead of one subtree.
+Use the glob tool — not shell find or recursive ls — to locate candidate files before searching or reading them. A pattern with no "/" matches basenames at any depth, so "*" matches every file in the tree rather than its top level. Avoid broad listings when a narrower path or pattern can identify the candidates. Results are files only, never directories, and include hidden and ignored files: a result that fits comes back in modification-time order, while a larger one is sampled across top-level entries, so it spans the tree instead of one subtree.
 ```
 
 ##### 启用 `sampleOverCapGlobResults: false` 时的 Glob 指导
 
 ```markdown
-Use the glob tool — not shell find — to discover files by path pattern. A pattern with no "/" matches basenames at any depth, so "*" matches every file in the tree rather than its top level. Results are files only, never directories, and include hidden and ignored files: a result that fits comes back in modification-time order, while a larger one keeps the modification-time-ordered head.
+Use the glob tool — not shell find or recursive ls — to locate candidate files before searching or reading them. A pattern with no "/" matches basenames at any depth, so "*" matches every file in the tree rather than its top level. Avoid broad listings when a narrower path or pattern can identify the candidates. Results are files only, never directories, and include hidden and ignored files: a result that fits comes back in modification-time order, while a larger one keeps the modification-time-ordered head.
 ```
 
 ##### Grep 指导
 
 ```markdown
-Use the grep tool — not shell grep or rg — to search file contents. Use read on a matched file when you need surrounding context.
+Search with the grep tool — not shell grep or rg — before reading files when you need to locate symbols, fields, errors, or other evidence. Narrow broad searches with path and include, then read only the relevant surrounding windows. Grep finds evidence; use a streaming Bash pipeline instead when every record must be parsed or aggregated.
 ```
 
 #### Token 影响

@@ -170,6 +170,8 @@ describe('registration', () => {
     const { ctx } = await setup()
     const prompt = renderPrompt(await ctx.systemPrompt.assemble())
     expect(prompt).toContain('Use the read tool')
+    expect(prompt).toContain('Search with grep first')
+    expect(prompt).toContain('Do not page through logs, JSONL, snapshots')
     expect(prompt).toContain('Use the write tool')
     expect(prompt).toContain('Use the edit tool')
   })
@@ -264,7 +266,7 @@ describe('read tool', () => {
     const { ctx } = await setup()
     const result = await call(ctx, 'read', { file_path: 'a.txt', limit: 99999 })
     expect(result.isError).toBe(true)
-    expect(text(result)).toContain('less than or equal to 2000')
+    expect(text(result)).toContain('less than or equal to 200')
   })
 
   it('rejects a blank file_path', async () => {
@@ -326,7 +328,7 @@ describe('read tool', () => {
   it('surfaces a byte-capped read as a truncated footer', async () => {
     const { ctx, fs } = await setup()
     // Many long lines so the window hits the byte cap before EOF.
-    fs.files.set('key:big.txt', Array.from({ length: 2000 }, () => 'y'.repeat(100)).join('\n'))
+    fs.files.set('key:big.txt', Array.from({ length: 2000 }, () => 'y'.repeat(300)).join('\n'))
     const result = await call(ctx, 'read', { file_path: 'big.txt' })
     expect(result.isError).toBe(false)
     expect(text(result)).toContain('Output capped.')
@@ -708,7 +710,7 @@ describe('read caps are plugin config', () => {
     expect(overCap.isError).toBe(true)
     expect(text(overCap)).toContain('less than or equal to 2')
     const readSchema = ctx.tools.schemas().find(s => s.name === 'read')
-    expect(JSON.stringify(readSchema)).toContain('Defaults to 2.')
+    expect(JSON.stringify(readSchema)).toContain('Defaults to and cannot exceed 2')
   })
 
   it('a configured readMaxLineLength truncates lines at the configured length', async () => {

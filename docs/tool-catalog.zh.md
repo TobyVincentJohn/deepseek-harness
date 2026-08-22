@@ -126,7 +126,7 @@ ask_user_question 会暂停工具调用，直到当前 UI 提供方返回人类�
 
 ### `run_code`
 
-针对可用工具执行 TypeScript 程序。接受两个必填参数：`code`，即异步函数的**函数体**（仅使用可擦除语法；支持顶层 `await` 和 `return`）；以及 `description`，简要说明该程序做什么。请根据系统提示词中的声明，以 `await tools.name(args)` 形式调用工具。请将确定性工作批量放入一个程序中；每次运行都从全新的内存状态开始。任务 I/O 应使用已声明的工具绑定，不要使用 Node 模块或 `process` API。嵌套工具也必须遵守只读请求。只有打印或返回的内容属于程序输出，请谨慎筛选。含图片的子工具结果会在运行结束后附加。
+针对可用工具执行 TypeScript 程序。接受两个必填参数：`code`，即异步函数的**函数体**（仅使用可擦除语法；支持顶层 `await` 和 `return`）；以及 `description`，简要说明该程序做什么。请根据系统提示词中的声明，以 `await tools.name(args)` 形式调用工具。请将确定性工作批量放入一个程序中；每次运行都从全新的内存状态开始。任务 I/O 应使用已声明的工具绑定，不要使用 Node 模块或 `process` API。先搜索再读取，保持读取窗口较窄，并在已声明相应工具时使用一个流式 Bash 流水线处理批量数据。使用声明的精确返回结构，检查命令退出码；运行失败时只修复最小成因一次。嵌套工具也必须遵守只读请求。只有打印或返回的内容属于程序输出，请谨慎筛选。含图片的子工具结果会在运行结束后附加。
 
 ```json
 {
@@ -185,7 +185,7 @@ ask_user_question 会暂停工具调用，直到当前 UI 提供方返回人类�
 
 ### `bash`
 
-执行 bash 命令（`bash -c`）并返回 stdout/stderr。每次调用都在新 shell 中运行：调用之间不保留任何状态（cwd、变量、函数），请传入 `workdir`，不要使用 `cd`。非零退出会报告为 `[exit code: N]`。确定性的批量分析应优先使用一个多行脚本或流水线，流式处理输入并输出紧凑汇总。当用户要求只读工作时，不得创建或修改文件；应使用内联脚本与标准流。当前 harness 环境信息通过托管的 `$DSH_*` 变量公开，需要时请检查这些变量。命令可能在文件沙箱中运行；被阻止的文件操作报告为 `[sandbox: file access denied under <mode> mode]`，这是策略拒绝，而不是命令缺陷，请勿换一种方式重试。较长的输出会截断，只保留尾部；如可用，完整输出会保存到文件并报告其路径。对于长时间运行的命令，请设置 `run_in_background: true`：调用会立即返回 job id；使用 `job_output` 读取输出，使用 `job_kill` 停止任务。
+执行 bash 命令（`bash -c`）并返回 stdout/stderr。每次调用都在新 shell 中运行：调用之间不保留任何状态（cwd、变量、函数），请传入 `workdir`，不要使用 `cd`。非零退出会报告为 `[exit code: N]`。在可用时，普通文件与文本发现应使用专用 glob 和 grep 工具。对于批量日志、归档或数据集，请使用一个多行流式流水线计算完整聚合，只输出带来源标识的有界计数、最大值、耗时或 top-N 行；不要打印原始记录，也不要把发现过程拆成重复的 ls/du/wc 调用。`command` 是 Bash 源码：应显式调用其他解释器，多行脚本使用带引号的 heredoc。在 Code Mode 中，应消费精确的前台结果结构（`kind`、`exitCode`、`stdout.text` 和 `stderr.text`）；调用已经 resolve 但退出码非零时，命令仍然失败。当用户要求只读工作时，不得创建或修改文件；应使用内联脚本与标准流。当前 harness 环境信息通过托管的 `$DSH_*` 变量公开，需要时请检查这些变量。命令可能在文件沙箱中运行；被阻止的文件操作报告为 `[sandbox: file access denied under <mode> mode]`，这是策略拒绝，而不是命令缺陷，请勿换一种方式重试。较长的输出会截断，只保留尾部；如可用，完整输出会保存到文件并报告其路径。对于长时间运行的命令，请设置 `run_in_background: true`：调用会立即返回 job id；使用 `job_output` 读取输出，使用 `job_kill` 停止任务。
 
 ```json
 {
@@ -193,11 +193,11 @@ ask_user_question 会暂停工具调用，直到当前 UI 提供方返回人类�
   "properties": {
     "command": {
       "type": "string",
-      "description": "The bash command to execute. Prefer one multiline script or pipeline for deterministic bulk work instead of several small calls."
+      "description": "The bash command to execute. For deterministic bulk work, use one multiline streaming script or pipeline that performs discovery, parsing, aggregation, and top-N selection together; keep stdout bounded to the final summary."
     },
     "description": {
       "type": "string",
-      "description": "Clear, concise description of what this command does in active voice, 5-10 words (shown in the UI). Examples: \"ls\" → \"List files in current directory\"; \"git status\" → \"Show working tree status\"; \"npm install\" → \"Install package dependencies\"."
+      "description": "Optional clear, concise description of what this command does in active voice, 5-10 words (shown in the UI). Examples: \"ls\" → \"List files in current directory\"; \"git status\" → \"Show working tree status\"; \"npm install\" → \"Install package dependencies\". When omitted, the UI uses \"Run shell command\"."
     },
     "timeoutMs": {
       "type": "number",
@@ -213,8 +213,7 @@ ask_user_question 会暂停工具调用，直到当前 UI 提供方返回人类�
     }
   },
   "required": [
-    "command",
-    "description"
+    "command"
   ]
 }
 ```
@@ -672,7 +671,7 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
 
 ### `read`
 
-读取 UTF-8 文本文件，并返回带行号的内容。
+读取 UTF-8 文本文件的目标窗口，并返回带行号的内容。位置未知时先搜索；不要通过重复读取来聚合批量数据。
 
 ```json
 {
@@ -688,7 +687,7 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
     },
     "limit": {
       "type": "number",
-      "description": "Maximum number of lines to return. Defaults to 2000."
+      "description": "Maximum number of lines to return. Defaults to and cannot exceed 200; keep the window as small as the task permits."
     }
   },
   "required": [
@@ -754,7 +753,7 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
 
 ### `glob`
 
-查找路径匹配 glob 模式的文件。只返回匹配的文件路径，绝不返回目录；包括隐藏文件和被忽略的文件，但排除 VCS 元数据目录。最多按修改时间顺序返回 100 条路径；如果结果更多，则改为返回从顶层条目中抽样的 100 条路径，说明已抽样，并报告完整排序列表的保存位置。该工具不枚举目录条目。
+在搜索或读取前定位路径匹配 glob 模式的候选文件。只返回匹配的文件路径，绝不返回目录；包括隐藏文件和被忽略的文件，但排除 VCS 元数据目录。最多按修改时间顺序返回 100 条路径；如果结果更多，则改为返回从顶层条目中抽样的 100 条路径，说明已抽样，并报告完整排序列表的保存位置。该工具不枚举目录条目。
 
 ```json
 {
@@ -779,7 +778,7 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
 
 ### `grep`
 
-使用 ripgrep 正则表达式搜索文件内容。返回带行号的匹配行，并按文件分组。前 250 条匹配会直接返回；结果达到上限时会报告完整匹配列表的保存位置。如需周边上下文，请对匹配的文件使用 read。
+在读取整个文件前，使用 ripgrep 正则表达式搜索文件内容。返回带行号的匹配行，并按文件分组。前 250 条匹配会直接返回；结果达到上限时会报告完整匹配列表的保存位置。如需周边上下文，请对匹配的文件使用 read。
 
 ```json
 {
@@ -787,7 +786,7 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
   "properties": {
     "pattern": {
       "type": "string",
-      "description": "Regular expression to search for (ripgrep syntax)."
+      "description": "Regular expression to search for (ripgrep syntax). Prefer a discriminating field, symbol, error, or event name over a broad wildcard."
     },
     "path": {
       "type": "string",

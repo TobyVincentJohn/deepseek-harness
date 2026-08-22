@@ -8,7 +8,7 @@ Requires a loaded executor Service Provider (e.g. `@deepseek-ai/dsh-bash-local`)
 
 The package root exposes only the Cordis plugin contract (`name`, `inject`, `Config`, `apply`); result rendering and background-process adaptation remain package-internal.
 
-The plugin also contributes the `tool:bash` prompt section (order 105): check the `[exit code: N]` marker on every result and investigate failures before moving on.
+The plugin also contributes the `tool:bash` prompt section (order 105): check the `[exit code: N]` marker on Native results; in Code Mode check the foreground `exitCode` and consume `stdout.text` / `stderr.text`. Investigate the exact failure, repair its smallest cause, and retry once before moving on.
 
 ## Tools
 
@@ -16,15 +16,15 @@ The plugin also contributes the `tool:bash` prompt section (order 105): check th
 
 | Arg | Type | Notes |
 |---|---|---|
-| `command` | string (required) | Run via `bash -c`. No state persists between calls — use `workdir`, not `cd`. Prefer one multiline script or pipeline for deterministic bulk work. |
-| `description` | string (required) | One-line, active-voice summary of the command (5-10 words), for UI/log display only — no effect on execution. |
+| `command` | string (required) | Run via `bash -c`. No state persists between calls — use `workdir`, not `cd`. This is Bash source; invoke another interpreter explicitly and use a quoted heredoc for multiline scripts. For deterministic bulk work, use one multiline streaming pipeline that emits only its bounded final summary. |
+| `description` | string | Optional one-line, active-voice summary of the command (5-10 words), for UI/log display only. Omission displays `Run shell command`. |
 | `timeoutMs` | number | Timeout override in milliseconds. The executor applies its configured default and cap. |
 | `workdir` | string | Working directory for this call. Defaults to the filesystem identity of the calling agent's session cwd (`session.header.cwd`) so each session runs in its own workspace; a relative `workdir` is resolved against that same identity. |
 | `run_in_background` | boolean | Return a job id immediately; no timeout applies. |
 | `sandbox_permissions` | string enum | ADVERTISED ONLY when the mounted executor sandboxes (`ctx.shell.sandboxMode` reports a confining default): the wider mode a denied command needs, from the closed target vocabulary `workspace-write`/`danger-full-access` (never cut down to the executor's default — the effective mode is per-session; strict widening is checked at execution against it, and a non-widening request fails without prompting anyone). |
 | `justification` | string | Required together with `sandbox_permissions` (each without the other is a validation error): one sentence for the user explaining why this exact command needs the wider access. |
 
-The tool description directs bulk analysis to stream inputs and emit a compact aggregate in one call. When the user requests read-only work, it directs commands to use inline scripts and standard streams without creating or modifying files.
+The tool description directs ordinary discovery through dedicated `glob` and `grep` tools when available. Bulk analysis uses one streaming pipeline that performs discovery, parsing, aggregation, and top-N selection together, keeps raw records out of output, and emits a bounded summary. In Code Mode, the typed foreground branch is exact: inspect `kind` and `exitCode`, then consume `stdout.text` and `stderr.text`; do not add compatibility wrappers for guessed shapes. A resolved tool call may still report a non-zero command exit. When the user requests read-only work, commands use inline scripts and standard streams without creating or modifying files.
 
 `command`, `workdir`, and `timeoutMs` are resolved against the executor's config defaults via `ctx.shell.resolve()` before execution, so the Service Definition (`ShellExecSpec`) receives explicit `workdir`/`timeoutMs` values. The workdir default is applied in the tool layer from the calling agent's `session.header.cwd` BEFORE `resolve()` — the per-session cwd must come from `exec.agent`, since N sessions share one executor; only when no session cwd is available does the executor fall back to its own config / `process.cwd()`. When sandbox policy is present, the tool reuses its already-canonical `workspaceRoot` as the workdir base so confinement and process launch cannot resolve the same session spelling differently.
 

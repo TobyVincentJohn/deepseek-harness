@@ -301,7 +301,7 @@ export function applyGlobTool(ctx: Context, caps: GlobToolCaps): void {
   ctx.systemPrompt.section({
     name: 'tool:glob',
     order: 103,
-    text: 'Use the glob tool — not shell find — to discover files by path pattern. A pattern with no "/" matches basenames at any depth, so "*" matches every file in the tree rather than its top level. '
+    text: 'Use the glob tool — not shell find or recursive ls — to locate candidate files before searching or reading them. A pattern with no "/" matches basenames at any depth, so "*" matches every file in the tree rather than its top level. Avoid broad listings when a narrower path or pattern can identify the candidates. '
       + `Results are files only, never directories, and include hidden and ignored files: a result that fits comes back in modification-time order, ${overCapGuidance}`,
   })
 
@@ -310,7 +310,7 @@ export function applyGlobTool(ctx: Context, caps: GlobToolCaps): void {
     : `a larger result returns the first ${caps.maxResults} paths in modification-time order`
   const tool = defineTool({
     name: 'glob',
-    description: 'Find files whose paths match a glob pattern. Returns matching file paths — never directories — '
+    description: 'Locate candidate files whose paths match a glob pattern before searching or reading them. Returns matching file paths — never directories — '
       + 'including hidden and ignored files (VCS metadata directories are excluded). '
       + `Up to ${caps.maxResults} paths come back in modification-time order; ${overCapDescription}, `
       + 'says so, and reports where the complete sorted list was saved. This tool does not enumerate directory entries.',

@@ -148,7 +148,9 @@ describe('mode-aware wire contribution', () => {
     const assembly = await systemPrompt.assemble()
     const names = assembly.sections.map(section => section.name)
     const rule = assembly.sections.find(section => section.name === 'tools:code-only')
-    expect(rule?.text).toContain(`\`${RUN_CODE_NAME}\` is the only tool you can call directly`)
+    expect(rule?.text).toContain(`\`${RUN_CODE_NAME}\` is the only top-level tool you can call`)
+    expect(rule?.text).toContain('SDK below are program methods, not directly callable tools')
+    expect(rule?.text).toContain('never emit a tool call named `glob`, `grep`, `read`, `bash`')
     // The rule is worthless after the guidance it qualifies.
     expect(names.indexOf('tools:code-only')).toBeLessThan(names.indexOf('tool:echo'))
     expect(names.indexOf('tools:code-only')).toBeLessThan(names.indexOf('tools:sdk'))
@@ -408,6 +410,8 @@ describe('mode-aware wire contribution', () => {
     expect(runCodeSchema?.description).toContain('Batch deterministic work into one program')
     expect(runCodeSchema?.description).toContain('fresh in-memory state')
     expect(runCodeSchema?.description).toContain('do not use Node module or `process` APIs')
+    expect(runCodeSchema?.description).toContain('Search before reading, keep reads narrow')
+    expect(runCodeSchema?.description).toContain('one streaming Bash pipeline for bulk data')
     expect(runCodeSchema?.description).toContain('Honor read-only requests')
     // Both required arguments are named here, not only in the parameter
     // schema: prose that describes the call as "pass the program" is what
@@ -427,6 +431,8 @@ describe('mode-aware wire contribution', () => {
     expect(runCodeSchema?.description).toContain('`return <value>`')
     expect(runCodeSchema?.description).toContain('Batch deterministic work into one program')
     expect(runCodeSchema?.description).toContain('fresh in-memory state')
+    expect(runCodeSchema?.description).toContain('Search before reading, keep reads narrow')
+    expect(runCodeSchema?.description).toContain('one streaming Bash pipeline for bulk data')
     expect(runCodeSchema?.description).toContain('`description`')
     expect(runCodeSchema?.description).not.toContain('TypeScript')
     const codeParam = (runCodeSchema?.parameters as { properties: { code: { description: string } } }).properties.code

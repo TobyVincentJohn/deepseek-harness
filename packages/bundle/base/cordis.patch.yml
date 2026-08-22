@@ -391,7 +391,7 @@
       name: '@deepseek-ai/dsh-repeat-tool-reminder'
       config:
         thresholds: [3, 5, 8]
-        countByTool: [run_code]
+        countByTool: [run_code, bash]
         argumentsPreviewChars: 500
 
     # Every mode enables the stable model-facing web_search tool. DeepSeek search

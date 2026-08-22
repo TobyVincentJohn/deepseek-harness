@@ -44,7 +44,7 @@ export const Config: z<Config> = z.object({
 /** Parsed tool args; execute validates value constraints absent from ParameterSchemaSpec. */
 interface BashToolArgs {
   command: string
-  description: string
+  description?: string
   timeoutMs?: number
   workdir?: string
   run_in_background?: boolean
@@ -56,7 +56,7 @@ function validateBashArgs(args: BashToolArgs): void {
   if (args.command.trim().length === 0) {
     throw new Error('invalid command: expected a non-empty string')
   }
-  if (args.description.trim().length === 0) {
+  if (args.description !== undefined && args.description.trim().length === 0) {
     throw new Error('invalid description: expected a non-empty string')
   }
   if (args.timeoutMs !== undefined && (!Number.isFinite(args.timeoutMs) || args.timeoutMs <= 0)) {
@@ -74,7 +74,7 @@ function bashDescription(backgroundEnabled: boolean, escalationModes: readonly S
   const base = 'Execute a bash command (`bash -c`) and return its stdout/stderr. '
     + 'Each call runs in a fresh shell: no state (cwd, variables, functions) persists between calls — '
     + 'pass `workdir` instead of using `cd`. Non-zero exits are reported as `[exit code: N]`. '
-    + 'For deterministic bulk analysis, prefer one multiline script or pipeline that streams inputs and emits a compact aggregate. '
+    + 'Use dedicated glob and grep tools for ordinary file and text discovery when available. For bulk logs, archives, or datasets, use one multiline streaming pipeline that computes the complete aggregate and emits only bounded counts, maxima, timings, or top-N rows with source identifiers; do not print raw records or split discovery into repeated ls/du/wc calls. The command is Bash source: invoke other interpreters explicitly and use a quoted heredoc for multiline scripts. In Code Mode, consume the exact foreground result shape (`kind`, `exitCode`, `stdout.text`, and `stderr.text`); a resolved call with a non-zero exit still failed. '
     + 'When the user requests read-only work, do not create or modify files; use inline scripts and standard streams. '
     + `Current harness environment facts are exposed through managed \`$${DSH_ENV_PREFIX}*\` variables; inspect them when needed. `
     + 'Commands may run under a file sandbox; a blocked file operation is reported as `[sandbox: file access denied under <mode> mode]` — a policy denial, not a bug in the command; do not retry another way. '
@@ -99,7 +99,10 @@ function bashDescription(backgroundEnabled: boolean, escalationModes: readonly S
  * The command remains the title on both paths; foreground cwd is passed through
  * for the bridge to resolve, while background descriptions remain card content.
  */
-type BashCallArgs = { command: string; description: string; workdir?: string; run_in_background?: boolean }
+type BashCallArgs = { command: string; description?: string; workdir?: string; run_in_background?: boolean }
+
+/** Stable UI copy when the model omits the optional display-only label. */
+const defaultBashDescription = 'Run shell command'
 
 function presentBashCall(args: BashCallArgs): GenericCallView | TerminalCallView {
   if (args.run_in_background === true) {
@@ -108,13 +111,13 @@ function presentBashCall(args: BashCallArgs): GenericCallView | TerminalCallView
       title: args.command,
       kind: 'execute',
       rawInput: args.command,
-      content: [{ type: 'text', text: args.description }],
+      content: [{ type: 'text', text: args.description ?? defaultBashDescription }],
     }
   }
   return {
     card: 'terminal',
     title: args.command,
-    description: args.description,
+    description: args.description ?? defaultBashDescription,
     ...args.workdir !== undefined ? { cwd: args.workdir } : {},
   }
 }
@@ -238,7 +241,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   ctx.systemPrompt.section({
     name: 'tool:bash',
     order: 105,
-    text: 'Check the [exit code: N] marker on every bash result; investigate failures before moving on.',
+    text: 'Check the [exit code: N] marker on every native bash result; in Code Mode check the foreground result\'s exitCode and read stdout.text / stderr.text. A resolved call can still report a failed command. Investigate that exact failure before moving on, repair only its smallest cause, and retry once. Use glob and grep for ordinary discovery when available. The command is Bash source, so invoke another interpreter explicitly and use a quoted heredoc for multiline scripts. For whole-dataset analysis, run one streaming pipeline and bound stdout to the final aggregate rather than returning raw records.',
   })
 
   ctx.tools.register(defineTool({
@@ -248,14 +251,14 @@ export function apply(ctx: Context, config: Config = {}): void {
       command: {
         type: 'string',
         required: true,
-        description: 'The bash command to execute. Prefer one multiline script or pipeline for deterministic bulk work instead of several small calls.',
+        description: 'The bash command to execute. For deterministic bulk work, use one multiline streaming script or pipeline that performs discovery, parsing, aggregation, and top-N selection together; keep stdout bounded to the final summary.',
       },
       description: {
         type: 'string',
-        required: true,
-        description: 'Clear, concise description of what this command does in active voice, '
+        description: 'Optional clear, concise description of what this command does in active voice, '
           + '5-10 words (shown in the UI). Examples: "ls" → "List files in current directory"; '
-          + '"git status" → "Show working tree status"; "npm install" → "Install package dependencies".',
+          + '"git status" → "Show working tree status"; "npm install" → "Install package dependencies". '
+          + 'When omitted, the UI uses "Run shell command".',
       },
       timeoutMs: { type: 'number', description: 'Timeout in milliseconds. The executor applies its configured default and cap, and kills the command on expiry.' },
       workdir: { type: 'string', description: 'Working directory for this command. Defaults to the session workspace; a relative path is resolved against it.' },

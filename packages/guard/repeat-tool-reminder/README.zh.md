@@ -13,13 +13,13 @@
     thresholds: [3, 5, 8]        # default; consecutive counts that trigger a reminder
     include: []                  # tool-name patterns to track; empty ⇒ all tools
     exclude: [todo_write]        # tool-name patterns transparent to the chain
-    countByTool: [run_code]      # root tools counted by name regardless of arguments
+    countByTool: [run_code, bash] # root tools counted by name regardless of arguments
     argumentsPreviewChars: 500   # default; cap on arguments quoted in the detailed reminder
 ```
 
 插件加载时，`thresholds` 会对错误配置快速失败：空列表、非整数、小于 2 的值或重复值都会抛出错误，绝不静默回退到默认值；`argumentsPreviewChars` 同样只接受大于等于 1 的整数。系统会将列表按升序规范化；第一个阈值只发送简短的通用提醒，后续每个阈值都会发送详细版本，列出工具、连续次数和规范参数。参数内容截取前 `argumentsPreviewChars` 个字符，并附带省略字符数标记，避免循环中的 `write`／`edit` 载荷无限制进入下一次请求（链键始终比较完整的规范字符串；此上限只约束提醒，不影响检测）。
 
-`include`、`exclude` 与 `countByTool` 条目支持 `*` 通配符，并针对调用时实际存在的工具执行谓词判断，而不是引用注册表条目。因此，与当前任何已注册工具都不匹配的模式并非错误（未加载 MCP 工具的部署中，`exclude: [mcp_*]` 仍然有效）；这与 `toolOrder` 的引用目标检查不同。`countByTool` 默认为 `[]`；基础 bundle 将其设为 `[run_code]`。
+`include`、`exclude` 与 `countByTool` 条目支持 `*` 通配符，并针对调用时实际存在的工具执行谓词判断，而不是引用注册表条目。因此，与当前任何已注册工具都不匹配的模式并非错误（未加载 MCP 工具的部署中，`exclude: [mcp_*]` 仍然有效）；这与 `toolOrder` 的引用目标检查不同。`countByTool` 默认为 `[]`；基础 bundle 将其设为 `[run_code, bash]`，使不断变化的 wrapper 程序和 shell 探测命令都会收到合并提醒。
 
 ## 链语义
 

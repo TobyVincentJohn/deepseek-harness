@@ -55,7 +55,7 @@ const COLLAPSE_SECTION_ORDER = 99
  * (the call fails) and the route (inside the program), because a rule the
  * model can only discover by being denied is one it corrects too late.
  */
-const CODE_ONLY_INSTRUCTION = `\`${RUN_CODE_NAME}\` is the only tool you can call directly — a tool call naming any other tool fails. Reach every tool the SDK declares below from inside the program.`
+const CODE_ONLY_INSTRUCTION = `\`${RUN_CODE_NAME}\` is the only top-level tool you can call. The names declared in the SDK below are program methods, not directly callable tools: never emit a tool call named \`glob\`, \`grep\`, \`read\`, \`bash\`, or any other SDK method. Reach them only inside one \`${RUN_CODE_NAME}\` program as \`await tools.name(args)\`; a top-level call naming one fails.`
 
 const SDK_RENDERERS: Record<string, (schemas: ToolSdkSchema[]) => string> = {
   typescript: renderToolsSdk,

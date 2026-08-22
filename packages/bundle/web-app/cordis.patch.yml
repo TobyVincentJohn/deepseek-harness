@@ -34,11 +34,11 @@
 
 - id: tools
   config:
-    # TEMPORARY workaround: DSH_TOOLS_MODE (native|code|both) opts a whole dsh
-    # process into Code Mode while per-session tool-presentation selection is being
-    # designed; unset keeps the schema default (native). Remove the env seam
-    # once the web UI owns the choice per session.
-    mode: !!js process.env.DSH_TOOLS_MODE
+    # TEMPORARY process-wide selection while the Web UI's per-session choice is
+    # being designed. Unset defaults to Codex-style `both`: native discovery/edit
+    # tools plus run_code for deterministic batching. Remove the env seam once the
+    # Web UI owns the choice per session.
+    mode: !!js process.env.DSH_TOOLS_MODE ?? 'both'
 
 # ── web-only host rows, the transport layer, and the browser roster ─────────
 

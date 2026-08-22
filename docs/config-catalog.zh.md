@@ -2571,6 +2571,8 @@ export interface Config {
 ```ts config-catalog
 /** Configuration bounds applied before either tool performs I/O. */
 export interface Config {
+  /** Whether to register `corpus_query` and its WARC-specific prompt guidance. */
+  enableCorpusQuery?: boolean
   /** Largest compressed WARC accepted by one query. */
   maxArchiveBytes?: number
   /** Largest text file read by package validation. */
@@ -2584,7 +2586,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/builder/tool-builder/src/index.ts:63`](../packages/builder/tool-builder/src/index.ts)
+来源：[`packages/builder/tool-builder/src/index.ts:64`](../packages/builder/tool-builder/src/index.ts)
 
 <a id="deepseek-aidsh-tool-fs"></a>
 

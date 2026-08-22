@@ -1,7 +1,8 @@
 /**
- * Deterministic model-facing operations for offline task builders.
- * `corpus_query` parses WARC data in-process; `validate_builder_package`
- * performs the cheap structural handoff checks shared by the builder tasks.
+ * Deterministic model-facing operations for synthetic task builders.
+ * `validate_builder_package` performs the shared cheap structural handoff
+ * checks; deployments that process offline corpora may also enable the
+ * in-process `corpus_query` WARC tool.
  * @module @deepseek-ai/dsh-tool-builder
  */
 
@@ -61,6 +62,8 @@ const JSON_PATHS = [
 
 /** Configuration bounds applied before either tool performs I/O. */
 export interface Config {
+  /** Whether to register `corpus_query` and its WARC-specific prompt guidance. */
+  enableCorpusQuery?: boolean
   /** Largest compressed WARC accepted by one query. */
   maxArchiveBytes?: number
   /** Largest text file read by package validation. */
@@ -74,6 +77,7 @@ export interface Config {
 }
 
 export const Config: z<Config> = z.object({
+  enableCorpusQuery: z.boolean().default(true),
   maxArchiveBytes: z.number().default(DEFAULT_MAX_ARCHIVE_BYTES),
   maxFileBytes: z.number().default(DEFAULT_MAX_FILE_BYTES),
   maxRecordChars: z.number().default(DEFAULT_MAX_RECORD_CHARS),
@@ -82,6 +86,7 @@ export const Config: z<Config> = z.object({
 })
 
 interface ResolvedConfig {
+  enableCorpusQuery: boolean
   maxArchiveBytes: number
   maxFileBytes: number
   maxRecordChars: number
@@ -379,7 +384,7 @@ function renderCorpus(value: { records: CorpusRecord[]; scanned: number; truncat
   return lines.join('\n')
 }
 
-/** Register both builder tools and their shared operational guidance. */
+/** Register package validation and, when configured, offline-corpus querying. */
 export function apply(ctx: Context, config: Config): void {
   const resolved = config as ResolvedConfig
   assertPositiveInteger('maxArchiveBytes', resolved.maxArchiveBytes)
@@ -392,10 +397,12 @@ export function apply(ctx: Context, config: Config): void {
   ctx.systemPrompt.section({
     name: 'tool:builder',
     order: 106,
-    text: 'Use corpus_query for WARC listing, search, and exact-URL reads instead of writing archive-parsing scripts. Use validate_builder_package once after the required task files are complete; repair only the named failures and rerun it only after a repair.',
+    text: resolved.enableCorpusQuery
+      ? 'Use corpus_query for WARC listing, search, and exact-URL reads instead of writing archive-parsing scripts. Use validate_builder_package once after the required task files are complete; repair only the named failures and rerun it only after a repair.'
+      : 'Use validate_builder_package once after the required task files are complete; repair only the named failures and rerun it only after a repair.',
   })
 
-  ctx.tools.register(defineTool({
+  if (resolved.enableCorpusQuery) ctx.tools.register(defineTool({
     name: 'corpus_query',
     description: 'List, search, or read response records in a local .warc or .warc.gz file without Python, warcio installation, or shell scripts.',
     parameters: {

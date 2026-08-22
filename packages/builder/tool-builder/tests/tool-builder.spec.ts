@@ -108,6 +108,14 @@ describe('tool-builder registration and corpus query', () => {
     expect(prompt).toContain('Use validate_builder_package once')
   })
 
+  it('omits corpus querying and its guidance for a normal synthetic pipeline', async () => {
+    const ctx = await setup({ enableCorpusQuery: false })
+    expect(ctx.tools.schemas().map(schema => schema.name)).toEqual(['validate_builder_package'])
+    const prompt = renderPrompt(await ctx.systemPrompt.assemble())
+    expect(prompt).not.toContain('corpus_query')
+    expect(prompt).toContain('Use validate_builder_package once')
+  })
+
   it('searches gzip WARC responses and reads an exact URL without Python', async () => {
     const ctx = await setup()
     const archive = join(root!, 'archive.warc.gz')

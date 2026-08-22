@@ -32,7 +32,7 @@ describe('builder agent preset', () => {
     if (failures.length > 1) throw new AggregateError(failures, 'builder preset smoke teardown failed')
   })
 
-  it('sends only the focused builder tool set and its corpus guidance', async () => {
+  it('sends only the normal synthetic-builder tool set', async () => {
     agentHandle.agent.followup(createUserMessage({
       content: [{ type: 'text', text: PROMPT }],
       source: { kind: 'user' },
@@ -41,12 +41,12 @@ describe('builder agent preset', () => {
 
     const requestHeader = agentHandle.agent.session.requestHeader()
     if (requestHeader === undefined) throw new Error('the builder agent issued no model request')
-    expect(requestHeader.system).toContain('Use corpus_query for WARC listing')
+    expect(requestHeader.system).not.toContain('corpus_query')
+    expect(requestHeader.system).toContain('Use validate_builder_package once')
     expect(requestHeader.system).not.toContain('web_search')
     expect(requestHeader.tools?.map(tool => tool.name)).toMatchInlineSnapshot(`
       [
         "bash",
-        "corpus_query",
         "edit",
         "glob",
         "grep",

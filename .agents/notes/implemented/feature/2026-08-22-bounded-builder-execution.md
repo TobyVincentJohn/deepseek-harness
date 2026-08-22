@@ -12,8 +12,8 @@ Synthetic task generation spends most of its tool time rediscovering determinist
 
 The harness ships a builder-specific execution path with five coordinated controls:
 
-1. `@deepseek-ai/dsh-tool-builder` provides `corpus_query`, an in-process WARC list/search/read tool backed by `warcio`, bounded archive reads, bounded record text, and bounded results.
-2. The shipped `builder` agent preset mounts only filesystem editing and search, Bash, background jobs, the builder tools, and compaction. It omits unrelated web, skill, workflow, planning, delegation, self-modification, and code-runtime schemas.
+1. `@deepseek-ai/dsh-tool-builder` can provide `corpus_query`, an in-process WARC list/search/read tool backed by `warcio`, bounded archive reads, bounded record text, and bounded results. `enableCorpusQuery` controls whether the tool and its guidance are registered.
+2. The shipped `builder` agent preset mounts only filesystem editing and search, Bash, background jobs, package validation, and compaction. It disables corpus querying for the normal synthetic pipeline and omits unrelated web, skill, workflow, planning, delegation, self-modification, and code-runtime schemas.
 3. `validate_builder_package` performs the shared cheap handoff checks once: required regular nonempty files, JSON and TOML parsing, and byte-identical instruction copies. It returns all failures together and does not execute task code or pipeline-specific judges.
 4. `dsh-repeat-tool-reminder` can deny calls after configured exact-repeat, name-counted, or consecutive-failure budgets. The base composition allows four completed identical root calls, 80 consecutive `run_code` or `bash` root calls, and 12 consecutive failed root calls before denying the next call. New user input resets the counters.
 5. `dsh-compaction-tool-result-pruner` replaces oversized historical tool-call arguments with valid digest-bearing JSON containing a bounded head/tail preview. The full original event stays in the append-only session log, while the replacement preserves tool name, call id, and call/result pairing on the model-visible surface.
@@ -22,7 +22,7 @@ The builder tools and preset keep their model-facing prose in English. The prese
 
 ## Ownership and limits
 
-`corpus_query` owns mechanical archive inspection, not browser rendering or semantic retrieval. It buffers the compressed archive through `ctx.fs` under a configurable byte limit because that seam does not expose a raw byte stream. `validate_builder_package` owns only invariant checks common to the builder handoff; signed inventories, rubric semantics, Harbor, verifier execution, and scoring remain pipeline responsibilities.
+When enabled, `corpus_query` owns mechanical archive inspection, not browser rendering or semantic retrieval. It buffers the compressed archive through `ctx.fs` under a configurable byte limit because that seam does not expose a raw byte stream. `validate_builder_package` owns only invariant checks common to the builder handoff; signed inventories, rubric semantics, Harbor, verifier execution, and scoring remain pipeline responsibilities.
 
 Convergence budgets are per live agent and memory-only. They operate on syntactic evidence: exact canonical arguments, root tool names, and failed results. Tool-input pruning occurs only after compaction pressure or canonical overflow qualifies the pruning pass. It adds a replacement event instead of mutating or deleting the source event.
 
@@ -40,7 +40,7 @@ Convergence budgets are per live agent and memory-only. They operate on syntacti
 
 ## Consequences
 
-Common WARC discovery and package checks become single bounded calls, and the builder starts with a materially smaller tool surface. Exact loops, fragmented shell/program sequences, and uninterrupted failures now have configurable stopping points. Large historical heredocs and generated scripts no longer remain verbatim in every post-pressure request, while their hashes and original events preserve identity and auditability.
+Package checks become one bounded call, and a corpus-enabled deployment also makes common WARC discovery a bounded call. The builder starts with a materially smaller tool surface. Exact loops, fragmented shell/program sequences, and uninterrupted failures now have configurable stopping points. Large historical heredocs and generated scripts no longer remain verbatim in every post-pressure request, while their hashes and original events preserve identity and auditability.
 
 The WARC query can hold as much compressed data in memory as `maxArchiveBytes`, its HTML conversion is intentionally simple, and plain-text scanning is not an index. The cheap validator cannot establish task quality. Legitimate long polling or recovery may hit a hard budget and require new user input or a changed action. Argument variants can evade the exact budget, so selected high-risk tools also use the broader name-counted limit.
 

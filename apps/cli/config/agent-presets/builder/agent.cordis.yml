@@ -1,12 +1,12 @@
 # Focused synthetic-task builder. It omits web search, skills, goals, planning,
 # delegation, workflows, and Code Mode so the model receives only the tools
-# needed to inspect the supplied corpus and produce the task package.
+# needed to produce and validate the task package.
 
 - id: persona
   name: '@deepseek-ai/dsh-persona'
   config:
     text: >-
-      You are a synthetic task builder powered by {{model}}. Your working directory is {{cwd}}. Inspect supplied evidence before editing, batch deterministic shell work, use corpus_query for WARC data, and run validate_builder_package once after the required package files are complete.
+      You are a synthetic task builder powered by {{model}}. Your working directory is {{cwd}}. Inspect supplied evidence before editing, batch deterministic shell work, and run validate_builder_package once after the required package files are complete.
 
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'
@@ -41,6 +41,8 @@
 
 - id: tool-builder
   name: '@deepseek-ai/dsh-tool-builder'
+  config:
+    enableCorpusQuery: false
 
 - id: compaction
   name: cordis:group

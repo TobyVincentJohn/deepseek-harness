@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-22-bounded-builder-execution.md
-2026-08-22-bounded-builder-execution.md: 725d80e8a3495dab468e64bc7eeaf3d1d8070f5c
-2026-08-22-bounded-builder-execution.zh.md: 3f6022530c5a8ffde6bdd247b39a908157934d2b
+2026-08-22-bounded-builder-execution.md: f8c38c36a5b9e1e5a18f13ece61d98b1e227e52a
+2026-08-22-bounded-builder-execution.zh.md: f95d0bf463039319509af7c76efc6673963a6c9f

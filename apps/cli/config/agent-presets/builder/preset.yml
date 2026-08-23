@@ -1,3 +1,3 @@
 name: Builder
-description: Focused synthetic-task builder with filesystem, shell, job, WARC-query, and package-validation tools.
+description: Focused offline builder with filesystem, shell, job, packaged/indexed corpus, and validation tools.
 order: 3

@@ -26,7 +26,7 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tool-str-replace-editor` | `str_replace_editor` | `ctx.tools`, `ctx.fs` | `tool/call`, `fs/observed after view presence/absence, edit absence, or successful mutation`, `tool/result` | - | Standalone view/create/unique literal replace/line insert tool over the filesystem seam; it composes with any shell or terminal API. |
 | `@deepseek-ai/dsh-tool-fs` | `edit`, `read`, `read_image`, `write` | `ctx.tools`, `ctx.fs`, `ctx.systemPrompt`, `ctx.attachments (image-tool registration)`, `ctx.llm + an image-capable route (image-tool execution)` | `tool/call`, `fs/write-intent or fs/edit-intent for mutations`, `fs/observed after read presence/absence or successful file operation`, `durable attachment (read_image)`, `tool/result` | - | The read-before-write/edit policy is added by `@deepseek-ai/dsh-fs-observation-policy` (an `fs/*` event-gate plugin, no schema change); a deployment that loads these tools is expected to also load it. The image tool is not registered without `ctx.attachments`; its schema is route-independent, and execution refuses unless the exact routed model declares image input. |
 | `@deepseek-ai/dsh-tool-fs-search` | `glob`, `grep` | `ctx.tools`, `ctx.subprocess`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | glob and grep are unconditional discovery tools that spawn the packaged ripgrep binary (`@vscode/ripgrep`) through ctx.subprocess as ordinary foreground calls (never background jobs) — no host `rg` install and no shell layer. The catalog uses `sampleOverCapGlobResults: true`; deployments must choose that behavior explicitly. Capped results save the complete formatted list through the optional ctx.spillStore backend; returned locators are follow-up-readable/searchable when the backend exposes local paths in co-located deployments. |
-| `@deepseek-ai/dsh-tool-builder` | `corpus_query`, `validate_builder_package` | `ctx.tools`, `ctx.fs`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | Builder-only tools for bounded WARC inspection and the shared cheap task-package handoff checks; neither tool executes generated scripts or pipeline validators. |
+| `@deepseek-ai/dsh-tool-builder` | `architecture_corpus_query`, `corpus_query`, `validate_architecture_candidate`, `validate_builder_package` | `ctx.tools`, `ctx.fs`, `ctx.systemPrompt`, `ctx.shell (architecture-validator registration)` | `tool/call`, `tool/result` | - | Builder-only tools for bounded WARC inspection, batched read-only architecture-index queries, structured pipeline-validator invocation, and shared cheap task-package handoff checks. |
 | `@deepseek-ai/dsh-tool-terminal` | `terminal_close`, `terminal_list`, `terminal_open`, `terminal_read`, `terminal_send`, `terminal_signal` | `ctx.tools`, `ctx.terminals`, `ctx.systemPrompt`, `ctx.jobs at call time for run_in_background` | `tool/call`, `tool/result` | - | The six terminal tools are opt-in and complement one-shot shell/filesystem tools. `terminal_send(run_in_background: true)` registers with `ctx.jobs`; TUI, named key sequences, BEL, resize, auto-start, and cross-agent sharing are absent from the schema. |
 | `@deepseek-ai/dsh-tool-goal` | `create_goal`, `get_goal`, `update_goal` | `ctx.tools`, `ctx.agents`, `ctx.goals`, `ctx.systemPrompt`, `a calling Agent in an authorized open turn` | `tool/call`, `goal/change for mutations`, `tool/result` | - | create, edit, pause, and resume require direct-human root authority; complete and blocked also accept the exact current goal round. The default blocked lower bound is three admitted rounds. |
 | `@deepseek-ai/dsh-schedule` | `schedule_create`, `schedule_delete`, `schedule_list` | `ctx.tools`, `ctx.sessions`, `Session persistence`, `a future live root Agent` | `tool/call`, `schedule/change create or delete`, `tool/result` | - | Registered only inside live root Agent scopes created after the opt-in Schedule plugin loads. Version 1 accepts after_seconds, explicit absolute at, and bounded fixed-rate every_seconds, and discloses session-local delivery; management reads and mutations require the shared Session persistence barrier. |
@@ -806,6 +806,49 @@ glob and grep are unconditional discovery tools that spawn the packaged ripgrep 
 
 ## `@deepseek-ai/dsh-tool-builder`
 
+### `architecture_corpus_query`
+
+Batch FTS searches, exact-URL reads, corpus stats, and an optional bounded listing against the frozen architecture search.sqlite index.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "index": {
+      "type": "string",
+      "description": "Path to the frozen search.sqlite index, relative to the session workspace or absolute."
+    },
+    "queries": {
+      "type": "array",
+      "description": "FTS5 queries to run together; at most 20.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "urls": {
+      "type": "array",
+      "description": "Exact final or requested URLs to read together; at most 40.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "per_query_limit": {
+      "type": "integer",
+      "description": "Hits per query, from 1 through 8."
+    },
+    "list_limit": {
+      "type": "integer",
+      "description": "Also list the first N corpus records, from 1 through 100."
+    }
+  },
+  "required": [
+    "index"
+  ]
+}
+```
+
+Source: [`packages/builder/tool-builder/src/index.ts`](../packages/builder/tool-builder/src/index.ts)
+
 ### `corpus_query`
 
 List, search, or read response records in a local .warc or .warc.gz file without Python, warcio installation, or shell scripts.
@@ -849,6 +892,47 @@ List, search, or read response records in a local .warc or .warc.gz file without
 
 Source: [`packages/builder/tool-builder/src/index.ts`](../packages/builder/tool-builder/src/index.ts)
 
+### `validate_architecture_candidate`
+
+Run the configured pipeline validator for one architecture JSON, write its report and merged plan, and return the complete validation report without constructing a shell command.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "candidate": {
+      "type": "string",
+      "description": "Architecture JSON path, relative to workspace or absolute."
+    },
+    "workspace": {
+      "type": "string",
+      "description": "Architecture work directory. Defaults to the session working directory."
+    },
+    "validator_script": {
+      "type": "string",
+      "description": "Pipeline validator script path. Omit when configured by the launch environment."
+    },
+    "python_executable": {
+      "type": "string",
+      "description": "Python executable path. Omit when configured by the launch environment."
+    },
+    "expected_lane_id": {
+      "type": "string",
+      "description": "Expected architecture lane identifier. Defaults to architecture-01."
+    },
+    "repair_feedback": {
+      "type": "string",
+      "description": "Optional repair-feedback JSON path supplied to the pipeline validator."
+    }
+  },
+  "required": [
+    "candidate"
+  ]
+}
+```
+
+Source: [`packages/builder/tool-builder/src/index.ts`](../packages/builder/tool-builder/src/index.ts)
+
 ### `validate_builder_package`
 
 Run the builder handoff checks once: required nonempty files, JSON/TOML parsing, and byte-identical instruction copies. Returns every failure together.
@@ -870,7 +954,7 @@ Run the builder handoff checks once: required nonempty files, JSON/TOML parsing,
 
 Source: [`packages/builder/tool-builder/src/index.ts`](../packages/builder/tool-builder/src/index.ts)
 
-Builder-only tools for bounded WARC inspection and the shared cheap task-package handoff checks; neither tool executes generated scripts or pipeline validators.
+Builder-only tools for bounded WARC inspection, batched read-only architecture-index queries, structured pipeline-validator invocation, and shared cheap task-package handoff checks.
 
 <a id="deepseek-aidsh-tool-terminal"></a>
 

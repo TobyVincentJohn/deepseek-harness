@@ -350,14 +350,17 @@ const TOOL_PACKAGES: ToolPackage[] = [
     pkg: '@deepseek-ai/dsh-tool-builder',
     dir: 'tool-builder',
     source: 'packages/builder/tool-builder/src/index.ts',
-    requires: ['ctx.tools', 'ctx.fs', 'ctx.systemPrompt'],
+    requires: ['ctx.tools', 'ctx.fs', 'ctx.systemPrompt', 'ctx.shell (architecture-validator registration)'],
     writes: ['tool/call', 'tool/result'],
     async mount(ctx) {
       await ctx.plugin(LocalFileSystem)
+      await ctx.plugin(LocalSubprocessRuntime)
+      await ctx.plugin(BashEnvPlugin)
+      await ctx.plugin(LocalBashExecutor)
       await ctx.plugin(ToolBuilder)
     },
     note:
-      'Builder-only tools for bounded WARC inspection and the shared cheap task-package handoff checks; neither tool executes generated scripts or pipeline validators.',
+      'Builder-only tools for bounded WARC inspection, batched read-only architecture-index queries, structured pipeline-validator invocation, and shared cheap task-package handoff checks.',
   },
   {
     pkg: '@deepseek-ai/dsh-tool-terminal',

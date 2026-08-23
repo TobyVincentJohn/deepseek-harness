@@ -1,4 +1,4 @@
-# Focused synthetic-task builder. It omits web search, skills, goals, planning,
+# Focused offline task builder. It omits web search, skills, goals, planning,
 # delegation, workflows, and Code Mode so the model receives only the tools
 # needed to inspect the supplied corpus and produce the task package.
 
@@ -6,7 +6,7 @@
   name: '@deepseek-ai/dsh-persona'
   config:
     text: >-
-      You are a synthetic task builder powered by {{model}}. Your working directory is {{cwd}}. Inspect supplied evidence before editing, batch deterministic shell work, use corpus_query for WARC data, and run validate_builder_package once after the required package files are complete.
+      You are a synthetic task builder powered by {{model}}. Your working directory is {{cwd}}. Inspect supplied evidence before editing, batch indexed architecture searches and exact reads in architecture_corpus_query, use corpus_query for packaged WARC data, and run the matching native validator once after an artifact is complete.
 
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'
@@ -41,6 +41,9 @@
 
 - id: tool-builder
   name: '@deepseek-ai/dsh-tool-builder'
+  config:
+    architectureValidatorScript: !!js process.env.LITELITE_ARCHITECTURE_VALIDATOR_SCRIPT
+    pythonExecutable: !!js process.env.LITELITE_PYTHON_EXECUTABLE
 
 - id: compaction
   name: cordis:group

@@ -10,6 +10,7 @@
     { "path": "../../../vendor/cordis" },
     { "path": "../../../vendor/schemastery" },
     { "path": "../../fs/fs" },
+    { "path": "../../shell/shell" },
     { "path": "../../core/tools" },
     { "path": "../../core/system-prompt" },
     { "path": "../../runtime-diagnostics/invariants" }

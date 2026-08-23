@@ -2579,10 +2579,62 @@ export interface Config {
   maxContentChars?: number
   /** Default maximum records returned by one corpus query. */
   maxResults?: number
+  /** Most FTS queries accepted by one architecture-corpus call. */
+  maxIndexedQueries?: number
+  /** Most exact URLs accepted by one architecture-corpus call. */
+  maxIndexedUrls?: number
+  /** Largest optional architecture-corpus listing. */
+  maxIndexedListResults?: number
+  /** Largest per-query FTS result set. */
+  maxIndexedResultsPerQuery?: number
+  /** Most characters retained from one FTS snippet. */
+  maxIndexedSnippetChars?: number
+  /** Most characters retained from one exact indexed document. */
+  maxIndexedDocumentChars?: number
+  /** Complete model-visible character budget for one indexed corpus result. */
+  maxIndexedOutputChars?: number
+  /** Complete model-visible character budget for one architecture validation result. */
+  maxArchitectureValidationOutputChars?: number
+  /** Pipeline-owned validator script supplied by the launch environment. */
+  architectureValidatorScript?: string
+  /** Python executable supplied by the launch environment. */
+  pythonExecutable?: string
+  /** Base-source JSON path relative to the architecture workspace. */
+  architectureBaseSourcesPath?: string
+  /** Architecture-seed JSON path relative to the architecture workspace. */
+  architectureSeedPath?: string
+  /** Validation-report path relative to the architecture workspace. */
+  architectureReportPath?: string
+  /** Merged-plan output path relative to the architecture workspace. */
+  architectureMergedPlanPath?: string
+  /** Frozen lake-cache directory relative to the architecture workspace. */
+  architecturePreloadedDir?: string
+  /** Expected architecture lane identifier. */
+  architectureExpectedLaneId?: string
+  /** Validator source cap. */
+  architectureSourceCap?: number
+  /** Validator architect-evidence cap. */
+  architectureEvidenceCap?: number
+  /** Validator target website count. */
+  architectureTargetSites?: number
+  /** Validator target document count. */
+  architectureTargetDocuments?: number
+  /** Validator maximum document count. */
+  architectureMaxDocuments?: number
+  /** Validator target corpus-token count. */
+  architectureTargetTokens?: number
+  /** Validator storage budget in bytes. */
+  architectureStorageBudgetBytes?: number
+  /** Validator adversarial website minimum. */
+  architectureAdversarialSiteMin?: number
+  /** Validator strict-adversarial website minimum. */
+  architectureStrictAdversarialSiteMin?: number
+  /** Maximum architecture-validator runtime in milliseconds. */
+  architectureValidatorTimeoutMs?: number
 }
 ```
 
-Source: [`packages/builder/tool-builder/src/index.ts:63`](../packages/builder/tool-builder/src/index.ts)
+Source: [`packages/builder/tool-builder/src/index.ts:74`](../packages/builder/tool-builder/src/index.ts)
 
 <a id="deepseek-aidsh-tool-fs"></a>
 

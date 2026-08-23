@@ -14,6 +14,8 @@ import { FsError } from '@deepseek-ai/dsh-fs'
 import type { FsInfo, FsTarget } from '@deepseek-ai/dsh-fs'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { GenericCallView, ToolExecution } from '@deepseek-ai/dsh-tools'
+import { registerArchitectureCorpusTool } from './architecture-corpus.ts'
+import { registerArchitectureValidatorTool } from './architecture-validator.ts'
 
 export const name = 'tool-builder'
 export const inject = ['tools', 'fs', 'systemPrompt']
@@ -23,6 +25,15 @@ const DEFAULT_MAX_FILE_BYTES = 16 * 1024 * 1024
 const DEFAULT_MAX_RECORD_CHARS = 2_000_000
 const DEFAULT_MAX_CONTENT_CHARS = 12_000
 const DEFAULT_MAX_RESULTS = 20
+const DEFAULT_MAX_INDEXED_QUERIES = 20
+const DEFAULT_MAX_INDEXED_URLS = 40
+const DEFAULT_MAX_INDEXED_LIST_RESULTS = 100
+const DEFAULT_MAX_INDEXED_RESULTS_PER_QUERY = 8
+const DEFAULT_MAX_INDEXED_SNIPPET_CHARS = 600
+const DEFAULT_MAX_INDEXED_DOCUMENT_CHARS = 4_000
+const DEFAULT_MAX_INDEXED_OUTPUT_CHARS = 12_000
+const DEFAULT_MAX_ARCHITECTURE_VALIDATION_OUTPUT_CHARS = 12_000
+const DEFAULT_ARCHITECTURE_VALIDATOR_TIMEOUT_MS = 120_000
 const MAX_RESULTS = 100
 const SNIPPET_CHARS = 500
 
@@ -71,6 +82,58 @@ export interface Config {
   maxContentChars?: number
   /** Default maximum records returned by one corpus query. */
   maxResults?: number
+  /** Most FTS queries accepted by one architecture-corpus call. */
+  maxIndexedQueries?: number
+  /** Most exact URLs accepted by one architecture-corpus call. */
+  maxIndexedUrls?: number
+  /** Largest optional architecture-corpus listing. */
+  maxIndexedListResults?: number
+  /** Largest per-query FTS result set. */
+  maxIndexedResultsPerQuery?: number
+  /** Most characters retained from one FTS snippet. */
+  maxIndexedSnippetChars?: number
+  /** Most characters retained from one exact indexed document. */
+  maxIndexedDocumentChars?: number
+  /** Complete model-visible character budget for one indexed corpus result. */
+  maxIndexedOutputChars?: number
+  /** Complete model-visible character budget for one architecture validation result. */
+  maxArchitectureValidationOutputChars?: number
+  /** Pipeline-owned validator script supplied by the launch environment. */
+  architectureValidatorScript?: string
+  /** Python executable supplied by the launch environment. */
+  pythonExecutable?: string
+  /** Base-source JSON path relative to the architecture workspace. */
+  architectureBaseSourcesPath?: string
+  /** Architecture-seed JSON path relative to the architecture workspace. */
+  architectureSeedPath?: string
+  /** Validation-report path relative to the architecture workspace. */
+  architectureReportPath?: string
+  /** Merged-plan output path relative to the architecture workspace. */
+  architectureMergedPlanPath?: string
+  /** Frozen lake-cache directory relative to the architecture workspace. */
+  architecturePreloadedDir?: string
+  /** Expected architecture lane identifier. */
+  architectureExpectedLaneId?: string
+  /** Validator source cap. */
+  architectureSourceCap?: number
+  /** Validator architect-evidence cap. */
+  architectureEvidenceCap?: number
+  /** Validator target website count. */
+  architectureTargetSites?: number
+  /** Validator target document count. */
+  architectureTargetDocuments?: number
+  /** Validator maximum document count. */
+  architectureMaxDocuments?: number
+  /** Validator target corpus-token count. */
+  architectureTargetTokens?: number
+  /** Validator storage budget in bytes. */
+  architectureStorageBudgetBytes?: number
+  /** Validator adversarial website minimum. */
+  architectureAdversarialSiteMin?: number
+  /** Validator strict-adversarial website minimum. */
+  architectureStrictAdversarialSiteMin?: number
+  /** Maximum architecture-validator runtime in milliseconds. */
+  architectureValidatorTimeoutMs?: number
 }
 
 export const Config: z<Config> = z.object({
@@ -79,6 +142,32 @@ export const Config: z<Config> = z.object({
   maxRecordChars: z.number().default(DEFAULT_MAX_RECORD_CHARS),
   maxContentChars: z.number().default(DEFAULT_MAX_CONTENT_CHARS),
   maxResults: z.number().default(DEFAULT_MAX_RESULTS),
+  maxIndexedQueries: z.number().default(DEFAULT_MAX_INDEXED_QUERIES),
+  maxIndexedUrls: z.number().default(DEFAULT_MAX_INDEXED_URLS),
+  maxIndexedListResults: z.number().default(DEFAULT_MAX_INDEXED_LIST_RESULTS),
+  maxIndexedResultsPerQuery: z.number().default(DEFAULT_MAX_INDEXED_RESULTS_PER_QUERY),
+  maxIndexedSnippetChars: z.number().default(DEFAULT_MAX_INDEXED_SNIPPET_CHARS),
+  maxIndexedDocumentChars: z.number().default(DEFAULT_MAX_INDEXED_DOCUMENT_CHARS),
+  maxIndexedOutputChars: z.number().default(DEFAULT_MAX_INDEXED_OUTPUT_CHARS),
+  maxArchitectureValidationOutputChars: z.number().default(DEFAULT_MAX_ARCHITECTURE_VALIDATION_OUTPUT_CHARS),
+  architectureValidatorScript: z.string(),
+  pythonExecutable: z.string(),
+  architectureBaseSourcesPath: z.string().default('task-planning/base_sources.json'),
+  architectureSeedPath: z.string().default('task-planning/architecture-seed.json'),
+  architectureReportPath: z.string().default('task-planning/architecture-validation.json'),
+  architectureMergedPlanPath: z.string().default('task-planning/architecture-merged-plan.json'),
+  architecturePreloadedDir: z.string().default('task-planning/lake-cache'),
+  architectureExpectedLaneId: z.string().default('architecture-01'),
+  architectureSourceCap: z.number().default(520),
+  architectureEvidenceCap: z.number().default(110),
+  architectureTargetSites: z.number().default(150),
+  architectureTargetDocuments: z.number().default(300),
+  architectureMaxDocuments: z.number().default(300),
+  architectureTargetTokens: z.number().default(4_500_000),
+  architectureStorageBudgetBytes: z.number().default(1_800_000_000),
+  architectureAdversarialSiteMin: z.number().default(45),
+  architectureStrictAdversarialSiteMin: z.number().default(16),
+  architectureValidatorTimeoutMs: z.number().default(DEFAULT_ARCHITECTURE_VALIDATOR_TIMEOUT_MS),
 })
 
 interface ResolvedConfig {
@@ -87,6 +176,32 @@ interface ResolvedConfig {
   maxRecordChars: number
   maxContentChars: number
   maxResults: number
+  maxIndexedQueries: number
+  maxIndexedUrls: number
+  maxIndexedListResults: number
+  maxIndexedResultsPerQuery: number
+  maxIndexedSnippetChars: number
+  maxIndexedDocumentChars: number
+  maxIndexedOutputChars: number
+  maxArchitectureValidationOutputChars: number
+  architectureValidatorScript?: string
+  pythonExecutable?: string
+  architectureBaseSourcesPath: string
+  architectureSeedPath: string
+  architectureReportPath: string
+  architectureMergedPlanPath: string
+  architecturePreloadedDir: string
+  architectureExpectedLaneId: string
+  architectureSourceCap: number
+  architectureEvidenceCap: number
+  architectureTargetSites: number
+  architectureTargetDocuments: number
+  architectureMaxDocuments: number
+  architectureTargetTokens: number
+  architectureStorageBudgetBytes: number
+  architectureAdversarialSiteMin: number
+  architectureStrictAdversarialSiteMin: number
+  architectureValidatorTimeoutMs: number
 }
 
 interface CorpusInput {
@@ -387,13 +502,45 @@ export function apply(ctx: Context, config: Config): void {
   assertPositiveInteger('maxRecordChars', resolved.maxRecordChars)
   assertPositiveInteger('maxContentChars', resolved.maxContentChars)
   assertPositiveInteger('maxResults', resolved.maxResults)
+  assertPositiveInteger('maxIndexedQueries', resolved.maxIndexedQueries)
+  assertPositiveInteger('maxIndexedUrls', resolved.maxIndexedUrls)
+  assertPositiveInteger('maxIndexedListResults', resolved.maxIndexedListResults)
+  assertPositiveInteger('maxIndexedResultsPerQuery', resolved.maxIndexedResultsPerQuery)
+  assertPositiveInteger('maxIndexedSnippetChars', resolved.maxIndexedSnippetChars)
+  assertPositiveInteger('maxIndexedDocumentChars', resolved.maxIndexedDocumentChars)
+  assertPositiveInteger('maxIndexedOutputChars', resolved.maxIndexedOutputChars)
+  assertPositiveInteger('maxArchitectureValidationOutputChars', resolved.maxArchitectureValidationOutputChars)
+  assertPositiveInteger('architectureSourceCap', resolved.architectureSourceCap)
+  assertPositiveInteger('architectureEvidenceCap', resolved.architectureEvidenceCap)
+  assertPositiveInteger('architectureTargetSites', resolved.architectureTargetSites)
+  assertPositiveInteger('architectureTargetDocuments', resolved.architectureTargetDocuments)
+  assertPositiveInteger('architectureMaxDocuments', resolved.architectureMaxDocuments)
+  assertPositiveInteger('architectureTargetTokens', resolved.architectureTargetTokens)
+  assertPositiveInteger('architectureStorageBudgetBytes', resolved.architectureStorageBudgetBytes)
+  assertPositiveInteger('architectureAdversarialSiteMin', resolved.architectureAdversarialSiteMin)
+  assertPositiveInteger('architectureStrictAdversarialSiteMin', resolved.architectureStrictAdversarialSiteMin)
+  assertPositiveInteger('architectureValidatorTimeoutMs', resolved.architectureValidatorTimeoutMs)
+  if (resolved.architectureExpectedLaneId.trim() === '') {
+    throw new Error('tool-builder: architectureExpectedLaneId must be a non-empty string')
+  }
   if (resolved.maxResults > MAX_RESULTS) throw new Error(`tool-builder: maxResults must be no greater than ${MAX_RESULTS}`)
 
   ctx.systemPrompt.section({
     name: 'tool:builder',
     order: 106,
-    text: 'Use corpus_query for WARC listing, search, and exact-URL reads instead of writing archive-parsing scripts. Use validate_builder_package once after the required task files are complete; repair only the named failures and rerun it only after a repair.',
+    text: 'Use corpus_query for WARC listing, search, and exact-URL reads. For architecture work, batch FTS searches and exact reads through architecture_corpus_query. Use validate_builder_package once after final task-package files are complete. Repair only named validation failures and rerun only after a repair.',
   })
+
+  registerArchitectureCorpusTool(ctx, resolved)
+  const validatorFiber = ctx.inject(['shell'], (shellCtx: Context) => {
+    registerArchitectureValidatorTool(shellCtx, resolved)
+    shellCtx.systemPrompt.section({
+      name: 'tool:builder-architecture-validator',
+      order: 107,
+      text: 'Run validate_architecture_candidate after the architecture candidate is complete. Repair only named validation failures and rerun only after a repair.',
+    })
+  })
+  ctx.effect(() => () => validatorFiber.dispose(), 'toolBuilder.architectureValidator')
 
   ctx.tools.register(defineTool({
     name: 'corpus_query',

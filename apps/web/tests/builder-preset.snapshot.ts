@@ -42,9 +42,11 @@ describe('builder agent preset', () => {
     const requestHeader = agentHandle.agent.session.requestHeader()
     if (requestHeader === undefined) throw new Error('the builder agent issued no model request')
     expect(requestHeader.system).toContain('Use corpus_query for WARC listing')
+    expect(requestHeader.system).toContain('architecture_corpus_query')
     expect(requestHeader.system).not.toContain('web_search')
     expect(requestHeader.tools?.map(tool => tool.name)).toMatchInlineSnapshot(`
       [
+        "architecture_corpus_query",
         "bash",
         "corpus_query",
         "edit",
@@ -55,6 +57,7 @@ describe('builder agent preset', () => {
         "job_output",
         "read",
         "read_image",
+        "validate_architecture_candidate",
         "validate_builder_package",
         "write",
       ]

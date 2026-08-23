@@ -6,4 +6,4 @@
 
 | 包 | 职责 | 面向模型的工具 |
 |---|---|---|
-| [`tool-builder/`](tool-builder/README.zh.md) | 确定性的离线语料检查与任务包交接检查 | `corpus_query`、`validate_builder_package` |
+| [`tool-builder/`](tool-builder/README.zh.md) | 确定性的打包／索引语料检查与构建器交接检查 | `architecture_corpus_query`、`corpus_query`、`validate_architecture_candidate`、`validate_builder_package` |

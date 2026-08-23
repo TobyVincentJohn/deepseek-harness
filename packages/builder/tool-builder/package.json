@@ -1,6 +1,6 @@
 {
   "name": "@deepseek-ai/dsh-tool-builder",
-  "description": "Deterministic corpus-query and package-validation tools for synthetic task builders",
+  "description": "Deterministic packaged/indexed corpus and validation tools for synthetic task builders",
   "version": "0.1.1-rc.2",
   "publishConfig": {
     "access": "public"
@@ -39,14 +39,21 @@
   "peerDependencies": {
     "@deepseek-ai/dsh-fs": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^",
+    "@deepseek-ai/dsh-shell": "workspace:^",
     "@deepseek-ai/dsh-system-prompt": "workspace:^",
     "@deepseek-ai/dsh-tools": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-shell": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@deepseek-ai/dsh-fs": "workspace:^",
     "@deepseek-ai/dsh-fs-local": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^",
+    "@deepseek-ai/dsh-shell": "workspace:^",
     "@deepseek-ai/dsh-system-prompt": "workspace:^",
     "@deepseek-ai/dsh-tools": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"

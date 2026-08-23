@@ -1,10 +1,13 @@
 import { gzipSync } from 'node:zlib'
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { CallId } from '@deepseek-ai/dsh-llm'
+import { ShellExecutor } from '@deepseek-ai/dsh-shell'
+import type { ShellExecRequest, ShellExecSpec, ShellProcess, ShellRunResult } from '@deepseek-ai/dsh-shell'
 import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { type ToolRunContext } from '@deepseek-ai/dsh-tools'
 import FsLocal from '@deepseek-ai/dsh-fs-local'
@@ -14,12 +17,54 @@ const signal = new AbortController().signal
 let root: string | undefined
 let context: Context | undefined
 let callNumber = 0
+let shellSpecs: ShellExecSpec[] = []
+let refreshValidatorReport = true
+let validatorExitCode: number | null = 0
+let validatorStderr = ''
+
+class FixtureShell extends ShellExecutor {
+  resolve(request: ShellExecRequest): ShellExecSpec {
+    return {
+      command: request.command,
+      workdir: request.workdir ?? process.cwd(),
+      timeoutMs: request.timeoutMs ?? 1_000,
+      stdoutMaxBytes: request.stdoutMaxBytes ?? 64_000,
+      ...(request.signal === undefined ? {} : { signal: request.signal }),
+      sandboxPolicy: request.sandboxPolicy,
+    }
+  }
+
+  async run(spec: ShellExecSpec): Promise<ShellRunResult> {
+    shellSpecs.push(spec)
+    if (refreshValidatorReport) {
+      const report = join(spec.workdir, 'task-planning/architecture-validation.json')
+      await writeFile(report, await readFile(report))
+    }
+    return {
+      exitCode: validatorExitCode,
+      signal: null,
+      timedOut: false,
+      aborted: false,
+      timeoutMs: spec.timeoutMs,
+      stdout: { text: 'validator complete', truncated: false },
+      stderr: { text: validatorStderr, truncated: false },
+    }
+  }
+
+  start(): ShellProcess {
+    throw new Error('not used by tool-builder tests')
+  }
+}
 
 afterEach(async () => {
   await context?.fiber.dispose()
   context = undefined
   if (root !== undefined) await rm(root, { recursive: true, force: true })
   root = undefined
+  shellSpecs = []
+  refreshValidatorReport = true
+  validatorExitCode = 0
+  validatorStderr = ''
 })
 
 async function setup(config: ToolBuilder.Config = {}): Promise<Context> {
@@ -28,6 +73,7 @@ async function setup(config: ToolBuilder.Config = {}): Promise<Context> {
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(FsLocal, { cwd: root })
+  await ctx.plugin(FixtureShell)
   await ctx.plugin(ToolBuilder, config)
   context = ctx
   return ctx
@@ -39,6 +85,16 @@ async function call(ctx: Context, name: string, argumentsValue: unknown) {
     callId: CallId(`builder-${++callNumber}`),
     name,
     arguments: argumentsValue,
+  })
+}
+
+async function callAtCwd(ctx: Context, name: string, argumentsValue: unknown) {
+  return await ctx.tools.execute({
+    signal,
+    callId: CallId(`builder-${++callNumber}`),
+    name,
+    arguments: argumentsValue,
+    agent: { session: { header: { cwd: root } } } as never,
   })
 }
 
@@ -102,10 +158,35 @@ describe('tool-builder registration and corpus query', () => {
   it('registers the focused tools and prompt guidance', async () => {
     const ctx = await setup()
     expect(ctx.tools.schemas().map(schema => schema.name).sort())
-      .toEqual(['corpus_query', 'validate_builder_package'])
+      .toEqual([
+        'architecture_corpus_query',
+        'corpus_query',
+        'validate_architecture_candidate',
+        'validate_builder_package',
+      ])
     const prompt = renderPrompt(await ctx.systemPrompt.assemble())
     expect(prompt).toContain('Use corpus_query for WARC listing')
+    expect(prompt).toContain('architecture_corpus_query')
+    expect(prompt).toContain('validate_architecture_candidate')
     expect(prompt).toContain('Use validate_builder_package once')
+  })
+
+  it('keeps archive, index, and package tools active when no shell provider is mounted', async () => {
+    root = await mkdtemp(join(tmpdir(), 'dsh-tool-builder-no-shell-'))
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(FsLocal, { cwd: root })
+    await ctx.plugin(ToolBuilder)
+    context = ctx
+    expect(ctx.tools.schemas().map(schema => schema.name).sort()).toEqual([
+      'architecture_corpus_query',
+      'corpus_query',
+      'validate_builder_package',
+    ])
+    const prompt = renderPrompt(await ctx.systemPrompt.assemble())
+    expect(prompt).toContain('architecture_corpus_query')
+    expect(prompt).not.toContain('validate_architecture_candidate')
   })
 
   it('searches gzip WARC responses and reads an exact URL without Python', async () => {
@@ -175,11 +256,17 @@ describe('tool-builder registration and corpus query', () => {
   })
 
   it('fails loud on invalid config, arguments, paths, and archive limits', async () => {
-    for (const config of [{ maxArchiveBytes: 0 }, { maxArchiveBytes: 1.5 }, { maxResults: 101 }]) {
+    for (const config of [
+      { maxArchiveBytes: 0 },
+      { maxArchiveBytes: 1.5 },
+      { maxResults: 101 },
+      { architectureExpectedLaneId: ' ' },
+    ]) {
       const failed = new Context()
       await failed.plugin(SystemPrompt)
       await failed.plugin(ToolRuntime)
       await failed.plugin(FsLocal, { cwd: process.cwd() })
+      await failed.plugin(FixtureShell)
       await expect(failed.plugin(ToolBuilder, config)).rejects.toThrow(/tool-builder/)
       await failed.fiber.dispose()
     }
@@ -207,6 +294,229 @@ describe('tool-builder registration and corpus query', () => {
     }
     const invalidRoot = await call(ctx, 'validate_builder_package', { root: ' ' })
     expect(invalidRoot.isError).toBe(true)
+  })
+
+  it('batches indexed FTS searches, exact reads, stats, and listings under one output cap', async () => {
+    const ctx = await setup({
+      maxIndexedSnippetChars: 30,
+      maxIndexedDocumentChars: 40,
+      maxIndexedOutputChars: 500,
+    })
+    const index = join(root!, 'search.sqlite')
+    const db = new DatabaseSync(index)
+    db.exec("CREATE VIRTUAL TABLE documents USING fts5(url UNINDEXED, requested_url UNINDEXED, title, media_type UNINDEXED, text, tokenize='porter unicode61')")
+    const insert = db.prepare('INSERT INTO documents(url, requested_url, title, media_type, text) VALUES(?,?,?,?,?)')
+    insert.run('https://example.test/alpha', 'https://example.test/a', 'Alpha', 'text/html', `needle ${'x'.repeat(100)}`)
+    insert.run('https://second.test/beta', 'https://second.test/beta', 'Beta', 'text/plain', 'second needle result')
+    db.close()
+
+    const result = await callAtCwd(ctx, 'architecture_corpus_query', {
+      index,
+      queries: ['needle', 'needle', 'second'],
+      urls: ['https://example.test/a', 'https://missing.test/'],
+      per_query_limit: 2,
+      list_limit: 2,
+    })
+    expect(result.isError).toBe(false)
+    expect(result.value).toMatchObject({ stats: { documents: 2, hosts: 2 } })
+    const value = result.value as {
+      searches: Array<{ query: string; hits: Array<{ title: string }> }>
+      documents: Array<{ url: string; truncated: boolean }>
+      listed: Array<{ title: string }>
+    }
+    expect(value.searches.map(search => search.query)).toEqual(['needle', 'second'])
+    expect(value.searches[0]?.hits.map(hit => hit.title)).toEqual(['Alpha', 'Beta'])
+    expect(value.documents).toMatchObject([{ url: 'https://example.test/alpha', truncated: true }])
+    expect(value.listed).toMatchObject([{ title: 'Alpha' }, { title: 'Beta' }])
+    const tool = ctx.tools.get('architecture_corpus_query')!
+    const rendered = tool.output.render({}, result.value!)[0]
+    expect(rendered).toMatchObject({ type: 'text' })
+    expect((rendered as { text: string }).text.length).toBeLessThanOrEqual(500)
+    expect(tool.presentCall?.({ index })).toMatchObject({ kind: 'search' })
+    expect(tool.isConcurrencySafe?.({ index })).toBe(true)
+  })
+
+  it('rejects malformed indexed corpus requests and incompatible databases', async () => {
+    const ctx = await setup({ maxIndexedQueries: 1, maxIndexedUrls: 1 })
+    const plain = join(root!, 'plain.sqlite')
+    const db = new DatabaseSync(plain)
+    db.exec('CREATE TABLE documents(url TEXT)')
+    db.close()
+    const empty = join(root!, 'empty.sqlite')
+    new DatabaseSync(empty).close()
+    const nonFts = join(root!, 'non-fts.sqlite')
+    const nonFtsDb = new DatabaseSync(nonFts)
+    nonFtsDb.exec('CREATE TABLE documents(url TEXT, requested_url TEXT, title TEXT, media_type TEXT, text TEXT)')
+    nonFtsDb.close()
+    const invalidUrl = join(root!, 'invalid-url.sqlite')
+    const invalidUrlDb = new DatabaseSync(invalidUrl)
+    invalidUrlDb.exec('CREATE VIRTUAL TABLE documents USING fts5(url UNINDEXED, requested_url UNINDEXED, title, media_type UNINDEXED, text)')
+    invalidUrlDb.prepare('INSERT INTO documents VALUES(?,?,?,?,?)').run('not a URL', 'not a URL', null, null, 'body')
+    invalidUrlDb.close()
+    await mkdir(join(root!, 'directory.sqlite'))
+    const cases = [
+      { index: ' ' },
+      { index: 'missing.sqlite' },
+      { index: 'directory.sqlite' },
+      { index: empty },
+      { index: plain },
+      { index: nonFts },
+      { index: plain, queries: ['one', 'two'] },
+      { index: plain, urls: ['one', 'two'] },
+      { index: plain, per_query_limit: 0 },
+      { index: plain, list_limit: 101 },
+    ]
+    for (const args of cases) {
+      expect((await call(ctx, 'architecture_corpus_query', args)).isError).toBe(true)
+    }
+    const invalidUrlResult = await call(ctx, 'architecture_corpus_query', { index: invalidUrl, list_limit: 1 })
+    expect(invalidUrlResult.isError).toBe(false)
+    expect(invalidUrlResult.value).toMatchObject({ stats: { hosts: 0 } })
+    const tool = ctx.tools.get('architecture_corpus_query')!
+    const listedText = tool.output.render({}, invalidUrlResult.value!)[0] as { text: string }
+    expect(listedText.text).toContain('unknown type | (untitled) | not a URL')
+
+    const queried = await call(ctx, 'architecture_corpus_query', {
+      index: invalidUrl,
+      queries: ['body'],
+      urls: ['not a URL'],
+    })
+    expect(queried.isError).toBe(false)
+    expect(queried.value).toMatchObject({ documents: [{ truncated: false }], listed: [] })
+    const queriedText = tool.output.render({}, queried.value!)[0] as { text: string }
+    expect(queriedText.text).toContain('(untitled) — not a URL')
+    expect(queriedText.text).not.toContain('result truncated')
+  })
+
+  it('runs the pipeline architecture validator with configured paths and returns its report', async () => {
+    const ctx = await setup({
+      architectureValidatorScript: 'scripts/validate_architecture_candidate.py',
+      pythonExecutable: '/fixture/python',
+      maxArchitectureValidationOutputChars: 300,
+      architectureExpectedLaneId: 'architecture-01',
+    })
+    await mkdir(join(root!, 'scripts'), { recursive: true })
+    await mkdir(join(root!, 'task-planning/lake-cache'), { recursive: true })
+    await writeFile(join(root!, 'scripts/validate_architecture_candidate.py'), '# fixture\n')
+    await writeFile(join(root!, 'candidate.json'), '{}\n')
+    await writeFile(join(root!, 'task-planning/base_sources.json'), '{}\n')
+    await writeFile(join(root!, 'task-planning/architecture-seed.json'), '{}\n')
+    await writeFile(join(root!, 'task-planning/architecture-validation.json'), JSON.stringify({ valid: true, errors: [] }))
+    await writeFile(join(root!, 'repair-feedback.json'), '{}\n')
+
+    const result = await callAtCwd(ctx, 'validate_architecture_candidate', {
+      candidate: 'candidate.json',
+      repair_feedback: 'repair-feedback.json',
+    })
+    expect(result.isError).toBe(false)
+    expect(result.value).toMatchObject({ valid: true, exitCode: 0, report: { valid: true } })
+    expect(shellSpecs).toHaveLength(1)
+    expect(shellSpecs[0]?.command).toContain("'--candidate'")
+    expect(shellSpecs[0]?.command).toContain("'--strict-adversarial-site-min' '16'")
+    expect(shellSpecs[0]?.command).toContain("'--expected-lane-id' 'architecture-01'")
+    expect(shellSpecs[0]?.command).toContain("'--repair-feedback'")
+    const tool = ctx.tools.get('validate_architecture_candidate')!
+    expect(tool.presentCall?.({ candidate: 'candidate.json' })).toMatchObject({ kind: 'search' })
+    expect(tool.isConcurrencySafe?.({ candidate: 'candidate.json' })).toBe(false)
+    const rendered = tool.output.render({}, result.value!)[0] as { text: string }
+    expect(rendered.text.length).toBeLessThanOrEqual(300)
+    expect(rendered.text).toContain('Architecture candidate valid')
+    const invalidRendered = tool.output.render({}, {
+      valid: false,
+      exitCode: null,
+      reportPath: 'report.json',
+      mergedPlanPath: 'merged.json',
+      report: { valid: false },
+      stdout: '',
+      stderr: 'failed',
+    })[0] as { text: string }
+    expect(invalidRendered.text).toContain('Architecture candidate invalid; validator exit signal.')
+  })
+
+  it('reports missing validator configuration and rejects unusable reports', async () => {
+    const ctx = await setup({ maxFileBytes: 30 })
+    await mkdir(join(root!, 'scripts'), { recursive: true })
+    await mkdir(join(root!, 'task-planning/lake-cache'), { recursive: true })
+    await writeFile(join(root!, 'scripts/validator.py'), '# fixture\n')
+    await writeFile(join(root!, 'candidate.json'), '{}\n')
+    await writeFile(join(root!, 'task-planning/base_sources.json'), '{}\n')
+    await writeFile(join(root!, 'task-planning/architecture-seed.json'), '{}\n')
+    await writeFile(join(root!, 'task-planning/architecture-validation.json'), '{}\n')
+
+    expect((await call(ctx, 'validate_architecture_candidate', { candidate: ' ' })).isError).toBe(true)
+    expect((await call(ctx, 'validate_architecture_candidate', { candidate: 'candidate.json' })).isError).toBe(true)
+    expect((await call(ctx, 'validate_architecture_candidate', {
+      candidate: 'candidate.json',
+      validator_script: 'scripts/validator.py',
+    })).isError).toBe(true)
+    expect((await call(ctx, 'validate_architecture_candidate', {
+      candidate: 'candidate.json',
+      validator_script: 'scripts/validator.py',
+      python_executable: '/fixture/python',
+      expected_lane_id: ' ',
+    })).isError).toBe(true)
+    expect((await call(ctx, 'validate_architecture_candidate', {
+      candidate: 'candidate.json',
+      validator_script: 'scripts/validator.py',
+      python_executable: '/fixture/python',
+      repair_feedback: 'missing-feedback.json',
+    })).isError).toBe(true)
+    expect((await call(ctx, 'validate_architecture_candidate', {
+      candidate: 'missing.json',
+      validator_script: 'scripts/validator.py',
+      python_executable: '/fixture/python',
+    })).isError).toBe(true)
+    await mkdir(join(root!, 'candidate-directory'))
+    expect((await call(ctx, 'validate_architecture_candidate', {
+      candidate: 'candidate-directory',
+      validator_script: 'scripts/validator.py',
+      python_executable: '/fixture/python',
+    })).isError).toBe(true)
+
+    await writeFile(join(root!, 'task-planning/architecture-validation.json'), JSON.stringify({ detail: 'x'.repeat(100) }))
+    expect((await call(ctx, 'validate_architecture_candidate', {
+      candidate: 'candidate.json',
+      validator_script: 'scripts/validator.py',
+      python_executable: '/fixture/python',
+      workspace: root,
+    })).isError).toBe(true)
+
+    refreshValidatorReport = false
+    expect((await call(ctx, 'validate_architecture_candidate', {
+      candidate: 'candidate.json',
+      validator_script: 'scripts/validator.py',
+      python_executable: '/fixture/python',
+    })).isError).toBe(true)
+    refreshValidatorReport = true
+
+    refreshValidatorReport = false
+    validatorExitCode = 2
+    validatorStderr = 'missing dependency: example'
+    const failedProcess = await call(ctx, 'validate_architecture_candidate', {
+      candidate: 'candidate.json',
+      validator_script: 'scripts/validator.py',
+      python_executable: '/fixture/python',
+    })
+    expect(failedProcess.isError).toBe(true)
+    expect(JSON.stringify(failedProcess)).toContain('missing dependency: example')
+    refreshValidatorReport = true
+    validatorExitCode = 0
+    validatorStderr = ''
+
+    await writeFile(join(root!, 'task-planning/architecture-validation.json'), JSON.stringify({ valid: false }))
+    const invalid = await call(ctx, 'validate_architecture_candidate', {
+      candidate: 'candidate.json',
+      validator_script: 'scripts/validator.py',
+      python_executable: '/fixture/python',
+    })
+    expect(invalid.value).toMatchObject({ valid: false, exitCode: 0 })
+
+    await writeFile(join(root!, 'task-planning/architecture-validation.json'), '[]')
+    expect((await call(ctx, 'validate_architecture_candidate', {
+      candidate: 'candidate.json',
+      validator_script: 'scripts/validator.py',
+      python_executable: '/fixture/python',
+    })).isError).toBe(true)
   })
 
   it('exposes deterministic presentation and renderer metadata', async () => {

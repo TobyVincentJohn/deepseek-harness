@@ -30,7 +30,7 @@
 | `@deepseek-ai/dsh-tool-str-replace-editor` | `str_replace_editor` | `ctx.tools`、`ctx.fs` | `tool/call`、`fs/observed after view presence/absence, edit absence, or successful mutation`、`tool/result` | - | 基于文件系统 seam 的独立查看／创建／唯一字面量替换／按行插入工具；可与任何 shell 或终端接口组合。 |
 | `@deepseek-ai/dsh-tool-fs` | `edit`、`read`、`read_image`、`write` | `ctx.tools`、`ctx.fs`、`ctx.systemPrompt`、`ctx.attachments (image-tool registration)`、`ctx.llm + an image-capable route (image-tool execution)` | `tool/call`、`fs/write-intent or fs/edit-intent for mutations`、`fs/observed after read presence/absence or successful file operation`、`durable attachment (read_image)`、`tool/result` | - | 先读后写／编辑策略由 `@deepseek-ai/dsh-fs-observation-policy` 添加；它是一个 `fs/*` 事件门禁插件，不会改变 schema。加载这些工具的部署按预期也应加载该插件。没有 `ctx.attachments` 时图片工具不会注册；其 schema 与路由无关，执行时除非确切路由的模型声明图片输入，否则拒绝。 |
 | `@deepseek-ai/dsh-tool-fs-search` | `glob`、`grep` | `ctx.tools`、`ctx.subprocess`、`ctx.systemPrompt` | `tool/call`、`tool/result` | - | glob 和 grep 是无条件可用的发现工具，通过 ctx.subprocess spawn 随包提供的 ripgrep 二进制文件（`@vscode/ripgrep`），并作为普通前台调用运行，绝不作为后台任务；无需在宿主机安装 `rg`，也不经过 shell 层。本目录使用 `sampleOverCapGlobResults: true`；部署必须显式选择该行为。结果超过上限时，会通过可选的 ctx.spillStore 后端保存完整的格式化列表；在共置部署中，如果后端公开本地路径，返回的定位信息可供后续读取／搜索。 |
-| `@deepseek-ai/dsh-tool-builder` | `corpus_query`、`validate_builder_package` | `ctx.tools`、`ctx.fs`、`ctx.systemPrompt` | `tool/call`、`tool/result` | - | 构建器专用工具，用于有界 WARC 检查与共享的低成本任务包交接检查；两个工具都不执行生成的脚本或流水线校验器。 |
+| `@deepseek-ai/dsh-tool-builder` | `architecture_corpus_query`、`corpus_query`、`validate_architecture_candidate`、`validate_builder_package` | `ctx.tools`、`ctx.fs`、`ctx.systemPrompt`、`ctx.shell (architecture-validator registration)` | `tool/call`、`tool/result` | - | 构建器专用工具，用于有界 WARC 检查、批量只读架构索引查询、结构化流水线校验器调用与共享的低成本任务包交接检查。 |
 | `@deepseek-ai/dsh-tool-terminal` | `terminal_close`、`terminal_list`、`terminal_open`、`terminal_read`、`terminal_send`、`terminal_signal` | `ctx.tools`、`ctx.terminals`、`ctx.systemPrompt`、`ctx.jobs at call time for run_in_background` | `tool/call`、`tool/result` | - | 这 6 个终端工具需要选择启用，用于补充一次性 bash／文件系统工具。`terminal_send(run_in_background: true)` 会注册到 `ctx.jobs`；schema 不包含 TUI、具名按键序列、BEL、调整尺寸、自动启动和跨 agent 共享。 |
 | `@deepseek-ai/dsh-tool-goal` | `create_goal`、`get_goal`、`update_goal` | `ctx.tools`、`ctx.agents`、`ctx.goals`、`ctx.systemPrompt`、`a calling Agent in an authorized open turn` | `tool/call`、`goal/change for mutations`、`tool/result` | - | create、edit、pause 和 resume 要求直接来自人类的根权限；complete 和 blocked 也接受确切的当前 Goal Round。blocked 的默认下限是 3 个获准的 Round。 |
 | `@deepseek-ai/dsh-schedule` | `schedule_create`、`schedule_delete`、`schedule_list` | `ctx.tools`、`ctx.sessions`、Session 持久化、未来创建的 live 根 Agent | `tool/call`、`schedule/change create or delete`、`tool/result` | - | 仅在选择启用的 Schedule 插件加载后创建的 live 根 Agent scope 内注册。版本 1 接受 after_seconds、显式绝对 at 和有界固定速率 every_seconds，并披露 session-local 交付；管理读取与变更必须通过共享的 Session 持久化 barrier。 |
@@ -812,6 +812,49 @@ glob 和 grep 是无条件可用的发现工具，通过 ctx.subprocess spawn �
 
 ## `@deepseek-ai/dsh-tool-builder`
 
+### `architecture_corpus_query`
+
+对冻结的架构 `search.sqlite` 索引批量执行 FTS 搜索、精确 URL 读取、语料统计和可选的有界列表。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "index": {
+      "type": "string",
+      "description": "Path to the frozen search.sqlite index, relative to the session workspace or absolute."
+    },
+    "queries": {
+      "type": "array",
+      "description": "FTS5 queries to run together; at most 20.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "urls": {
+      "type": "array",
+      "description": "Exact final or requested URLs to read together; at most 40.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "per_query_limit": {
+      "type": "integer",
+      "description": "Hits per query, from 1 through 8."
+    },
+    "list_limit": {
+      "type": "integer",
+      "description": "Also list the first N corpus records, from 1 through 100."
+    }
+  },
+  "required": [
+    "index"
+  ]
+}
+```
+
+来源：[`packages/builder/tool-builder/src/index.ts`](../packages/builder/tool-builder/src/index.ts)
+
 ### `corpus_query`
 
 无需 Python、安装 warcio 或 shell 脚本，即可列出、搜索或读取本地 .warc 或 .warc.gz 文件中的响应记录。
@@ -855,6 +898,47 @@ glob 和 grep 是无条件可用的发现工具，通过 ctx.subprocess spawn �
 
 来源：[`packages/builder/tool-builder/src/index.ts`](../packages/builder/tool-builder/src/index.ts)
 
+### `validate_architecture_candidate`
+
+对一个架构 JSON 运行已配置的流水线校验器，写入报告与合并计划，并在无需构造 shell 命令的情况下返回完整校验报告。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "candidate": {
+      "type": "string",
+      "description": "Architecture JSON path, relative to workspace or absolute."
+    },
+    "workspace": {
+      "type": "string",
+      "description": "Architecture work directory. Defaults to the session working directory."
+    },
+    "validator_script": {
+      "type": "string",
+      "description": "Pipeline validator script path. Omit when configured by the launch environment."
+    },
+    "python_executable": {
+      "type": "string",
+      "description": "Python executable path. Omit when configured by the launch environment."
+    },
+    "expected_lane_id": {
+      "type": "string",
+      "description": "Expected architecture lane identifier. Defaults to architecture-01."
+    },
+    "repair_feedback": {
+      "type": "string",
+      "description": "Optional repair-feedback JSON path supplied to the pipeline validator."
+    }
+  },
+  "required": [
+    "candidate"
+  ]
+}
+```
+
+来源：[`packages/builder/tool-builder/src/index.ts`](../packages/builder/tool-builder/src/index.ts)
+
 ### `validate_builder_package`
 
 一次运行构建器交接检查：必需的非空文件、JSON／TOML 解析以及逐字节相同的 instruction 副本。一次返回所有失败。
@@ -876,7 +960,7 @@ glob 和 grep 是无条件可用的发现工具，通过 ctx.subprocess spawn �
 
 来源：[`packages/builder/tool-builder/src/index.ts`](../packages/builder/tool-builder/src/index.ts)
 
-构建器专用工具，用于有界 WARC 检查与共享的低成本任务包交接检查；两个工具都不执行生成的脚本或流水线校验器。
+构建器专用工具，用于有界 WARC 检查、批量只读架构索引查询、结构化流水线校验器调用与共享的低成本任务包交接检查。
 
 <a id="deepseek-aidsh-tool-terminal"></a>
 
